@@ -1,5 +1,10 @@
-use bevy::{app::Plugin, log::info};
+use bevy::{
+    app::Plugin,
+    log::info,
+    prelude::{Deref, DerefMut, Resource},
+};
 use bevy_transport::{config::NetworkConfig, TransportPlugin};
+use tokio::runtime::Runtime;
 
 pub struct QuicPlugin {
     tick_rate: Option<u16>,
@@ -18,5 +23,19 @@ impl Plugin for QuicPlugin {
             app.insert_resource(NetworkConfig::new(tick_rate));
             info!("Transport plugin was already initialized. Make sure the system for NetworkUpdate is handled, either by the default transport or your own.")
         }
+    }
+}
+
+#[derive(Resource, Deref, DerefMut)]
+pub(crate) struct TokioRuntime(pub(crate) Runtime);
+
+impl Default for TokioRuntime {
+    fn default() -> Self {
+        Self(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("Unable to create async runtime."),
+        )
     }
 }
