@@ -6,6 +6,8 @@ use bevy::{
 use bevy_transport::{config::NetworkConfig, TransportPlugin};
 use tokio::runtime::Runtime;
 
+mod client;
+
 pub struct QuicPlugin {
     tick_rate: Option<u16>,
 }
@@ -20,8 +22,9 @@ impl Plugin for QuicPlugin {
                     .unwrap_or(bevy_transport::config::DEFAULT_TICK_RATE),
             ));
         } else if let Some(tick_rate) = self.tick_rate {
+            info!("Transport plugin was already initialized. Make sure the system for NetworkUpdate is handled, either by the default transport or your own.");
             app.insert_resource(NetworkConfig::new(tick_rate));
-            info!("Transport plugin was already initialized. Make sure the system for NetworkUpdate is handled, either by the default transport or your own.")
+            app.insert_resource(TokioRuntime::default());
         }
     }
 }
