@@ -1,9 +1,12 @@
 use std::{error::Error, net::SocketAddr, sync::Arc};
 
 use bevy::{
+    app::Plugin,
+    ecs::system::ResMut,
     log::error,
     prelude::{Resource, World},
 };
+use bevy_transport::NetworkUpdate;
 use s2n_quic::{client::Connect, Client};
 use tokio::sync::mpsc::{self, error::TryRecvError, Receiver, Sender};
 
@@ -17,6 +20,10 @@ pub struct QuicClient {
     client: Arc<Client>,
     conn_receiver: Receiver<ConnectionState>,
     conn_sender: Arc<Sender<ConnectionState>>,
+}
+
+pub struct QuicClientConfig {
+    max_connections: usize,
 }
 
 impl QuicClient {
@@ -78,4 +85,16 @@ impl QuicClient {
 
         data
     }
+}
+
+pub struct QuicClientPlugin;
+
+impl Plugin for QuicClientPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        app.add_systems(NetworkUpdate, client_update);
+    }
+}
+
+pub fn client_update(mut client: ResMut<QuicClient>) {
+    let new_conns = client.handle_connections();
 }

@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.15.0"
+bevy = "0.15.1"
 bevy_transport = { path = "crates/bevy_transport" }
-s2n-quic = "1.51.0"
-thiserror = "2.0.9"
+s2n-quic = "1.53.0"
+thiserror = "2.0.11"
 tokio = { version = "1.42.0", features = ["sync", "rt-multi-thread", "macros"] }
