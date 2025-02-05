@@ -3,7 +3,7 @@ use std::{error::Error, net::SocketAddr, sync::Arc};
 use bevy::{
     app::Plugin,
     ecs::system::ResMut,
-    log::error,
+    log::{error, warn},
     prelude::{Resource, World},
 };
 use bevy_transport::{
@@ -11,7 +11,7 @@ use bevy_transport::{
     transport::NetReceiver,
     NetworkUpdate,
 };
-use s2n_quic::{client::Connect, Client};
+use s2n_quic::{client::Connect, Client, Connection};
 use tokio::sync::mpsc::{self, error::TryRecvError, Receiver, Sender};
 
 use crate::{common::ConnectionState, TokioRuntime};
@@ -24,6 +24,7 @@ struct QuicClient {
     client: Arc<Client>,
     conn_receiver: Receiver<ConnectionState>,
     conn_sender: Arc<Sender<ConnectionState>>,
+    connection: Option<Connection>,
 }
 
 impl QuicClient {
@@ -40,6 +41,7 @@ impl QuicClient {
             client: Arc::new(client),
             conn_receiver: rx,
             conn_sender: Arc::new(tx),
+            connection: None,
         };
 
         world.insert_resource(quic_client);
@@ -103,5 +105,40 @@ impl QuicClientConfig {
 }
 
 pub fn client_update(mut client: ResMut<QuicClient>) {
-    let new_conns = client.handle_connections();
+    let mut new_conns = client.handle_connections();
+
+    for conn_opt in new_conns.iter_mut() {
+        if let Some(conn) = conn_opt.take() {
+            match conn {
+                ConnectionState::Connected(connection) => {
+                    if let Some(client_conn) = &client.connection {
+                        let addr_res = client_conn.remote_addr();
+
+                        let addr_str: String = if let Ok(addr) = addr_res {
+                            addr.to_string()
+                        } else {
+                            addr_res.err().unwrap().to_string()
+                        };
+
+                        warn!(
+                            "bevy quic currently only supports one connection. disconnecting new connection: {}",
+                            addr_str
+                        );
+
+                        // TODO: Create enum of error codes
+                        let temp_code: u32 = 0;
+                        connection.close(temp_code.into());
+
+                        return;
+                    }
+
+                    client.connection = Some(connection);
+                }
+                ConnectionState::Failed(error) => warn!("connection failed: {}", error),
+                ConnectionState::InProgress => todo!(),
+            }
+        } else {
+            break;
+        }
+    }
 }
