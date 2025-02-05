@@ -21,7 +21,7 @@ impl Plugin for QuicPlugin {
         } else {
             info!("Transport plugin was already initialized. Make sure the system for NetworkUpdate is handled, either by the default transport or your own.");
             app.insert_resource(NetworkConfig::new(self.tick_rate));
-            app.insert_resource(TokioRuntime::default());
+            app.init_resource::<TokioRuntime>();
         }
     }
 }

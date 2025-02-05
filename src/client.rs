@@ -6,7 +6,11 @@ use bevy::{
     log::error,
     prelude::{Resource, World},
 };
-use bevy_transport::NetworkUpdate;
+use bevy_transport::{
+    message::{InboundMessage, OutboundMessage},
+    transport::NetReceiver,
+    NetworkUpdate,
+};
 use s2n_quic::{client::Connect, Client};
 use tokio::sync::mpsc::{self, error::TryRecvError, Receiver, Sender};
 
@@ -15,15 +19,11 @@ use crate::{common::ConnectionState, TokioRuntime};
 const NEW_CONN_BATCH_SIZE: usize = 5;
 
 #[derive(Resource)]
-pub struct QuicClient {
+struct QuicClient {
     runtime: tokio::runtime::Handle,
     client: Arc<Client>,
     conn_receiver: Receiver<ConnectionState>,
     conn_sender: Arc<Sender<ConnectionState>>,
-}
-
-pub struct QuicClientConfig {
-    max_connections: usize,
 }
 
 impl QuicClient {
@@ -85,13 +85,20 @@ impl QuicClient {
 
         data
     }
+
+    pub fn rec_data(&mut self) -> InboundMessage {
+        todo!()
+    }
 }
 
-pub struct QuicClientPlugin;
+#[derive(Resource)]
+pub struct QuicClientConfig {
+    max_connections: usize,
+}
 
-impl Plugin for QuicClientPlugin {
-    fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(NetworkUpdate, client_update);
+impl QuicClientConfig {
+    pub fn max_connections(&self) -> usize {
+        self.max_connections
     }
 }
 

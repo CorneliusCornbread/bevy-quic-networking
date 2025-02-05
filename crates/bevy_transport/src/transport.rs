@@ -8,7 +8,7 @@ use crate::message::{InboundMessage, OutboundMessage};
 /// https://github.com/bacongobbler/bevy_simple_networking/blob/main/src/transport.rs
 #[derive(Resource)]
 pub struct NetReceiver {
-    messages: VecDeque<InboundMessage>,
+    pub messages: VecDeque<InboundMessage>,
 }
 
 #[derive(Resource)]

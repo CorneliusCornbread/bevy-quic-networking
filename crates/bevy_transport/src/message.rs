@@ -20,7 +20,7 @@ pub struct OutboundMessage {
 }
 
 pub struct InboundMessage {
-    pub network_sender: SocketAddr,
+    pub origin: SocketAddr,
     pub target_id: i32,
     pub data: Bytes,
 }
