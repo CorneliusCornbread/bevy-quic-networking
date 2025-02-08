@@ -1,5 +1,6 @@
+use bevy::prelude::Deref;
 use s2n_quic::{stream::BidirectionalStream, Connection};
-use std::error::Error;
+use std::{error::Error, net::IpAddr};
 
 #[derive(Debug)]
 pub enum TransportData {
@@ -37,3 +38,29 @@ impl TransportData {
         }
     }
 }
+
+pub enum IpAddrBytes {
+    V4([u8; 4]),
+    V6([u8; 16]),
+}
+
+impl IpAddrBytes {
+    pub fn to_vec(&self) -> Vec<u8> {
+        match self {
+            IpAddrBytes::V4(ipv4_addr) => ipv4_addr.to_vec(),
+            IpAddrBytes::V6(ipv6_addr) => ipv6_addr.to_vec(),
+        }
+    }
+}
+
+impl From<IpAddr> for IpAddrBytes {
+    fn from(value: IpAddr) -> Self {
+        match value {
+            IpAddr::V4(ipv4_addr) => IpAddrBytes::V4(ipv4_addr.octets()),
+            IpAddr::V6(ipv6_addr) => IpAddrBytes::V6(ipv6_addr.octets()),
+        }
+    }
+}
+
+#[derive(Deref)]
+pub struct ConnectionId(u64);

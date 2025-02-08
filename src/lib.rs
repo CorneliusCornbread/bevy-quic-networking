@@ -6,8 +6,8 @@ use bevy::{
 use bevy_transport::{config::NetworkConfig, TransportPlugin};
 use tokio::runtime::Runtime;
 
-mod client;
-mod common;
+pub mod client;
+pub mod common;
 
 pub struct QuicPlugin {
     tick_rate: u16,
