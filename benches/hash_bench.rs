@@ -10,7 +10,7 @@ use rand::{
     rngs::ThreadRng,
 };
 
-use bevy_quic_networking::common::IpAddrBytes;
+use bevy_quic_networking::common::{ConnectionId, IpAddrBytes};
 
 const BENCH_SIZE: usize = 1000;
 
@@ -21,28 +21,31 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     let addrs_ipv4: [SocketAddr; BENCH_SIZE] = std::array::from_fn(|_| random_ipv4(&mut rng));
     let addrs_ipv6: [SocketAddr; BENCH_SIZE] = std::array::from_fn(|_| random_ipv6(&mut rng));
 
-    group.bench_function("ipv4-ahash", |b| b.iter(|| ipvx_ahash(&addrs_ipv4)));
-    group.bench_function("ipv6-ahash", |b| b.iter(|| ipvx_ahash(&addrs_ipv6)));
+    group.bench_function("ipv4-ahash", |b| b.iter(|| ipvx_ahash_raw(&addrs_ipv4)));
+    group.bench_function("ipv6-ahash", |b| b.iter(|| ipvx_ahash_raw(&addrs_ipv6)));
 
-    group.bench_function("ipv4-str-ahash", |b| b.iter(|| ipvx_str_ahash(&addrs_ipv4)));
-    group.bench_function("ipv6-str-ahash", |b| b.iter(|| ipvx_str_ahash(&addrs_ipv6)));
+    group.bench_function("ipv4-into-ahash", |b| {
+        b.iter(|| ipvx_into_ahash(&addrs_ipv4))
+    });
+    group.bench_function("ipv6-into-ahash", |b| {
+        b.iter(|| ipvx_into_ahash(&addrs_ipv6))
+    });
 }
 
-fn ipvx_ahash(addrs: &[SocketAddr; BENCH_SIZE]) -> [u64; BENCH_SIZE] {
+fn ipvx_ahash_raw(addrs: &[SocketAddr; BENCH_SIZE]) -> [ConnectionId; BENCH_SIZE] {
     std::array::from_fn(|i| {
         let mut hasher = AHasher::default();
         let bytes: IpAddrBytes = addrs[i].ip().into();
-        hasher.write(bytes.to_vec().as_slice());
-        hasher.finish()
+        match bytes {
+            IpAddrBytes::V4(v4) => hasher.write(&v4),
+            IpAddrBytes::V6(v6) => hasher.write(&v6),
+        }
+        ConnectionId(hasher.finish())
     })
 }
 
-fn ipvx_str_ahash(addrs: &[SocketAddr; BENCH_SIZE]) -> [u64; BENCH_SIZE] {
-    std::array::from_fn(|i| {
-        let mut hasher = AHasher::default();
-        hasher.write(addrs[i].to_string().as_bytes());
-        hasher.finish()
-    })
+fn ipvx_into_ahash(addrs: &[SocketAddr; BENCH_SIZE]) -> [ConnectionId; BENCH_SIZE] {
+    std::array::from_fn(|i| addrs[i].into())
 }
 
 fn random_ipv4(rng: &mut ThreadRng) -> SocketAddr {

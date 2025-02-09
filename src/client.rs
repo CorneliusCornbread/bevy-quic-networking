@@ -5,8 +5,11 @@ use bevy::{
     log::{error, warn},
     prelude::{Resource, World},
 };
-use bevy_transport::message::InboundMessage;
-use s2n_quic::{client::Connect, stream::BidirectionalStream, Client, Connection};
+use s2n_quic::{
+    client::Connect,
+    stream::{BidirectionalStream, SendStream},
+    Client, Connection,
+};
 use tokio::sync::mpsc::{self, error::TryRecvError, Receiver, Sender};
 
 use crate::{common::TransportData, TokioRuntime};
@@ -17,8 +20,8 @@ const NEW_CONN_BATCH_SIZE: usize = 5;
 struct QuicClient {
     runtime: tokio::runtime::Handle,
     client: Arc<Client>,
-    conn_receiver: Receiver<TransportData>,
-    conn_sender: Arc<Sender<TransportData>>,
+    socket_rec_channel: Receiver<TransportData>,
+    socket_send_channel: Sender<Vec<u8>>,
     stream: Option<Arc<BidirectionalStream>>,
 }
 
@@ -26,7 +29,10 @@ impl QuicClient {
     pub fn init_client(world: &mut World) -> Result<(), Box<dyn Error>> {
         // TODO: TLS certificate support
         let client = Client::builder().with_io("0.0.0.0:0")?.start()?;
-        let (tx, rx) = mpsc::channel(1);
+        let (outbount_sender, outbound_receiver) = mpsc::channel(32);
+        let (inbound_sender, inbound_receiver) = mpsc::channel(32);
+
+        let (new_conn_sender, new_conn_receiver) = mpsc::channel(32);
 
         let quic_client = Self {
             runtime: world
@@ -34,19 +40,46 @@ impl QuicClient {
                 .handle()
                 .clone(),
             client: Arc::new(client),
-            conn_receiver: rx,
-            conn_sender: Arc::new(tx),
+            socket_rec_channel: inbound_receiver,
+            socket_send_channel: outbount_sender,
             stream: None,
         };
+        let arc_client = quic_client.client.clone();
+
+        quic_client.runtime.spawn(async move {
+            Self::outbound_send_task(arc_client, outbound_receiver, new_conn_receiver).await
+        });
+
+        quic_client
+            .runtime
+            .spawn(async move { Self::inbound_rec_task(inbound_sender, new_conn_sender).await });
 
         world.insert_resource(quic_client);
         Ok(())
     }
 
+    async fn outbound_send_task(
+        client: Arc<Client>,
+        mut receiver: Receiver<Vec<u8>>,
+        mut new_conns: Receiver<SendStream>,
+    ) {
+        let current_cons: Vec<Connection> = Vec::new();
+
+        loop {
+            while let Some(data) = receiver.recv().await {}
+        }
+    }
+
+    async fn inbound_rec_task(
+        mut sender: Sender<TransportData>,
+        mut new_conns: Sender<SendStream>,
+    ) {
+    }
+
     // TODO: Change socket address argument to instead be received from the sender
     fn start_client(&self, addr: SocketAddr) -> Result<Receiver<TransportData>, ()> {
         let client = self.client.clone();
-        let sender = self.conn_sender.clone();
+        let sender = self.socket_send_channel.clone();
         let runtime = self.runtime.clone();
 
         let _task = runtime.spawn(async move {
@@ -57,7 +90,7 @@ impl QuicClient {
                 //let _ = sender.send(connection).await;
 
                 let stream = connection.open_bidirectional_stream().await;
-                let _ = sender.send(stream.into());
+                //let _ = sender.send(stream.into());
             }
         });
 
@@ -67,18 +100,18 @@ impl QuicClient {
     pub fn try_connect(&mut self, addr: SocketAddr) {
         let connect = Connect::new(addr);
         let client = self.client.clone();
-        let sender = self.conn_sender.clone();
+        let sender = self.socket_send_channel.clone();
         let runtime = self.runtime.clone();
 
         runtime.spawn(async move {
             let mut connection: TransportData = client.connect(connect).await.into();
             connection.try_keep_alive(true);
-            let _ = sender.send(connection).await;
+            //let _ = sender.send(connection).await;
         });
     }
 
     pub fn handle_connections(&mut self) -> [Option<TransportData>; NEW_CONN_BATCH_SIZE] {
-        let rec = &mut self.conn_receiver;
+        let rec = &mut self.socket_rec_channel;
         let mut flag = false;
         let data: [Option<TransportData>; NEW_CONN_BATCH_SIZE] = std::array::from_fn(|_| {
             // Avoids fragmentation of the returned data.

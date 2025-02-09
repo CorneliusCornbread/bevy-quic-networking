@@ -1,7 +1,13 @@
+use ahash::AHasher;
 use bevy::prelude::Deref;
 use s2n_quic::{stream::BidirectionalStream, Connection};
-use std::{error::Error, net::IpAddr};
+use std::{
+    error::Error,
+    hash::Hasher,
+    net::{IpAddr, SocketAddr},
+};
 
+// TODO: Move connect, stream information, and data information into their own enums
 #[derive(Debug)]
 pub enum TransportData {
     Connected(Connection),
@@ -63,4 +69,40 @@ impl From<IpAddr> for IpAddrBytes {
 }
 
 #[derive(Deref)]
-pub struct ConnectionId(u64);
+pub struct ConnectionId(pub u64);
+
+impl From<IpAddr> for ConnectionId {
+    fn from(value: IpAddr) -> Self {
+        let bytes: IpAddrBytes = value.into();
+        let mut hasher = AHasher::default();
+
+        match bytes {
+            IpAddrBytes::V4(v4) => {
+                hasher.write(&v4);
+                hasher.finish().into()
+            }
+            IpAddrBytes::V6(v6) => {
+                hasher.write(&v6);
+                hasher.finish().into()
+            }
+        }
+    }
+}
+
+impl From<SocketAddr> for ConnectionId {
+    fn from(value: SocketAddr) -> Self {
+        let mut hasher = AHasher::default();
+        let bytes: IpAddrBytes = value.ip().into();
+        match bytes {
+            IpAddrBytes::V4(v4) => hasher.write(&v4),
+            IpAddrBytes::V6(v6) => hasher.write(&v6),
+        }
+        ConnectionId(hasher.finish())
+    }
+}
+
+impl From<u64> for ConnectionId {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
