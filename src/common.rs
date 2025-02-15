@@ -1,3 +1,4 @@
+use aeronet::io::bytes::Bytes;
 use ahash::AHasher;
 use bevy::prelude::Deref;
 use s2n_quic::{stream::BidirectionalStream, Connection};
@@ -15,6 +16,7 @@ pub enum TransportData {
     ConnectInProgress,
     NewStream(BidirectionalStream),
     FailedStream(Box<dyn Error + Send>),
+    ReceivedData(Bytes),
 }
 
 impl From<Result<Connection, s2n_quic::connection::Error>> for TransportData {
@@ -34,14 +36,6 @@ impl From<Result<BidirectionalStream, s2n_quic::connection::Error>> for Transpor
         }
 
         Self::FailedStream(Box::new(value.unwrap_err()))
-    }
-}
-
-impl TransportData {
-    pub fn try_keep_alive(&mut self, keep_alive: bool) {
-        if let TransportData::Connected(conn) = self {
-            conn.keep_alive(keep_alive);
-        }
     }
 }
 
