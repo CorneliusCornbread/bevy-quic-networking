@@ -1,7 +1,6 @@
 use aeronet::io::bytes::Bytes;
 use ahash::AHasher;
 use bevy::prelude::Deref;
-use s2n_quic::{stream::BidirectionalStream, Connection};
 use std::{
     error::Error,
     hash::Hasher,
@@ -11,32 +10,11 @@ use std::{
 // TODO: Move connect, stream information, and data information into their own enums
 #[derive(Debug)]
 pub enum TransportData {
-    Connected(Connection),
+    Connected(ConnectionId),
     ConnectFailed(Box<dyn Error + Send>),
     ConnectInProgress,
-    NewStream(BidirectionalStream),
     FailedStream(Box<dyn Error + Send>),
     ReceivedData(Bytes),
-}
-
-impl From<Result<Connection, s2n_quic::connection::Error>> for TransportData {
-    fn from(value: Result<Connection, s2n_quic::connection::Error>) -> Self {
-        if let Ok(conn) = value {
-            return Self::Connected(conn);
-        }
-
-        Self::ConnectFailed(Box::new(value.unwrap_err()))
-    }
-}
-
-impl From<Result<BidirectionalStream, s2n_quic::connection::Error>> for TransportData {
-    fn from(value: Result<BidirectionalStream, s2n_quic::connection::Error>) -> Self {
-        if let Ok(stream) = value {
-            return Self::NewStream(stream);
-        }
-
-        Self::FailedStream(Box::new(value.unwrap_err()))
-    }
 }
 
 pub enum IpAddrBytes {
@@ -62,8 +40,20 @@ impl From<IpAddr> for IpAddrBytes {
     }
 }
 
-#[derive(Deref)]
-pub struct ConnectionId(pub u64);
+#[derive(Deref, Debug)]
+pub struct ConnectionId(u64);
+
+impl From<u64> for ConnectionId {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl Into<u64> for ConnectionId {
+    fn into(self) -> u64 {
+        self.0
+    }
+}
 
 impl From<IpAddr> for ConnectionId {
     fn from(value: IpAddr) -> Self {
@@ -95,8 +85,30 @@ impl From<SocketAddr> for ConnectionId {
     }
 }
 
-impl From<u64> for ConnectionId {
-    fn from(value: u64) -> Self {
-        Self(value)
+pub trait AddrHash {
+    fn addr_hash(&self, hasher: &mut AHasher) -> ConnectionId;
+}
+
+impl AddrHash for SocketAddr {
+    fn addr_hash(&self, hasher: &mut AHasher) -> ConnectionId {
+        let bytes: IpAddrBytes = self.ip().into();
+        match bytes {
+            IpAddrBytes::V4(v4) => hasher.write(&v4),
+            IpAddrBytes::V6(v6) => hasher.write(&v6),
+        }
+
+        ConnectionId(hasher.finish())
+    }
+}
+
+impl AddrHash for IpAddr {
+    fn addr_hash(&self, hasher: &mut AHasher) -> ConnectionId {
+        let bytes: IpAddrBytes = (*self).into();
+        match bytes {
+            IpAddrBytes::V4(v4) => hasher.write(&v4),
+            IpAddrBytes::V6(v6) => hasher.write(&v6),
+        }
+
+        ConnectionId(hasher.finish())
     }
 }

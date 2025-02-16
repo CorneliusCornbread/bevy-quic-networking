@@ -1,34 +1,38 @@
-use std::{error::Error, net::SocketAddr, sync::Arc};
+use std::{error::Error, hash::Hash, sync::Arc};
 
 use aeronet::io::bytes::Bytes;
+use ahash::AHasher;
 use bevy::{
-    ecs::{component::Component, system::ResMut, world::FromWorld},
-    log::{error, warn},
+    ecs::component::Component,
     prelude::{Resource, World},
 };
 use s2n_quic::{
-    client::Connect,
     stream::{BidirectionalStream, SendStream},
-    Client, Connection, Server,
+    Server,
 };
 use tokio::{
-    sync::mpsc::{self, error::TryRecvError, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
 
-use crate::{common::TransportData, TokioRuntime};
+use crate::{
+    common::{AddrHash, ConnectionId, TransportData},
+    TokioRuntime,
+};
 
 const NEW_CONN_BATCH_SIZE: usize = 5;
 const SERVER_ADDR: &str = "127.0.0.1:7777";
 
 #[derive(Component)]
-struct QuicServer {
+pub struct QuicServer {
     runtime: tokio::runtime::Handle,
     socket_rec_channel: Receiver<TransportData>,
     socket_send_channel: Sender<Bytes>,
+    connection_rec_channel: Receiver<ConnectionId>,
     stream: Option<Arc<BidirectionalStream>>,
     send_task: JoinHandle<()>,
     rec_task: JoinHandle<()>,
+    hasher: AHasher,
 }
 
 impl QuicServer {
@@ -42,22 +46,31 @@ impl QuicServer {
         let (outbount_sender, outbound_receiver) = mpsc::channel(32);
         let (inbound_sender, inbound_receiver) = mpsc::channel(32);
         let (new_conn_sender, new_conn_receiver) = mpsc::channel(32);
+        let (bevy_new_conn_sender, bevy_new_conn_receiver) = mpsc::channel(32);
 
         let send_task = runtime.spawn(async move {
             Self::outbound_send_task(outbound_receiver, new_conn_receiver).await
         });
 
         let rec_task = runtime.spawn(async move {
-            Self::inbound_rec_task(server, inbound_sender, new_conn_sender).await
+            Self::inbound_rec_task(
+                server,
+                inbound_sender,
+                new_conn_sender,
+                bevy_new_conn_sender,
+            )
+            .await
         });
 
         let quic_server = Self {
             runtime,
             socket_rec_channel: inbound_receiver,
             socket_send_channel: outbount_sender,
+            connection_rec_channel: bevy_new_conn_receiver,
             send_task,
             rec_task,
             stream: None,
+            hasher: AHasher::default(),
         };
 
         Ok(quic_server)
@@ -67,8 +80,11 @@ impl QuicServer {
         mut server: Server,
         sender: Sender<TransportData>,
         new_conns: Sender<SendStream>,
+        bevy_new_conns: Sender<ConnectionId>,
     ) {
         let mut connections = Vec::new();
+        let mut hasher = AHasher::default();
+
         'running: loop {
             while let Some(mut con) = server.accept().await {
                 let _ = con.keep_alive(true);
@@ -80,6 +96,14 @@ impl QuicServer {
                         .send(send)
                         .await
                         .expect("Error handling new connection");
+
+                    // TODO: Figure out why the hell this function can fail and handle its error properly
+                    let addr = con
+                        .remote_addr()
+                        .expect("No remote address for new connection");
+
+                    let data = TransportData::Connected(addr.addr_hash(&mut hasher));
+                    sender.send(data);
                 } else {
                     // TODO: error codes
                     con.close(99_u32.into());

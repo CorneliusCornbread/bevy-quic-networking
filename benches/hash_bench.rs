@@ -40,7 +40,7 @@ fn ipvx_ahash_raw(addrs: &[SocketAddr; BENCH_SIZE]) -> [ConnectionId; BENCH_SIZE
             IpAddrBytes::V4(v4) => hasher.write(&v4),
             IpAddrBytes::V6(v6) => hasher.write(&v6),
         }
-        ConnectionId(hasher.finish())
+        hasher.finish().into()
     })
 }
 
