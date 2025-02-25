@@ -49,9 +49,9 @@ impl From<u64> for ConnectionId {
     }
 }
 
-impl Into<u64> for ConnectionId {
-    fn into(self) -> u64 {
-        self.0
+impl From<ConnectionId> for u64 {
+    fn from(val: ConnectionId) -> Self {
+        val.0
     }
 }
 
