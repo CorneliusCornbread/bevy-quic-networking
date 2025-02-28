@@ -1,4 +1,9 @@
-use std::{error::Error, hash::Hash, sync::Arc};
+use std::{
+    error::Error,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    str::FromStr,
+    sync::Arc,
+};
 
 use aeronet::io::bytes::Bytes;
 use ahash::AHasher;
@@ -21,7 +26,7 @@ use crate::{
 };
 
 const NEW_CONN_BATCH_SIZE: usize = 5;
-const SERVER_ADDR: &str = "127.0.0.1:7777";
+const SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
 #[derive(Component)]
 pub struct QuicServer {
@@ -33,11 +38,16 @@ pub struct QuicServer {
     send_task: JoinHandle<()>,
     rec_task: JoinHandle<()>,
     hasher: AHasher,
+    max_connections: usize,
 }
 
 impl QuicServer {
-    pub fn start_server(world: &mut World) -> Result<Self, Box<dyn Error>> {
-        let server = Server::builder().with_io(SERVER_ADDR)?.start()?;
+    pub fn start_server(
+        world: &mut World,
+        max_connections: usize,
+        port: u16,
+    ) -> Result<Self, Box<dyn Error>> {
+        let server = Server::builder().with_io(server_addr(port))?.start()?;
         let runtime = world
             .get_resource_or_init::<TokioRuntime>()
             .handle()
@@ -71,6 +81,7 @@ impl QuicServer {
             rec_task,
             stream: None,
             hasher: AHasher::default(),
+            max_connections,
         };
 
         Ok(quic_server)
@@ -83,7 +94,6 @@ impl QuicServer {
         bevy_new_conns: Sender<ConnectionId>,
     ) {
         let mut connections = Vec::new();
-        let mut hasher = AHasher::default();
 
         'running: loop {
             while let Some(mut con) = server.accept().await {
@@ -92,17 +102,21 @@ impl QuicServer {
                 if let Ok(Some(stream)) = con.accept_bidirectional_stream().await {
                     let (rec, send) = stream.split();
                     connections.push(rec);
+
+                    // TODO: change the sender to have a custom StreamId type
+                    bevy_new_conns
+                        .send(send.id().into())
+                        .await
+                        .expect("Error sending new connection to Bevy thread");
+
                     new_conns
                         .send(send)
                         .await
                         .expect("Error handling new connection");
 
-                    // TODO: Figure out why the hell this function can fail and handle its error properly
-                    let addr = con
-                        .remote_addr()
-                        .expect("No remote address for new connection");
+                    let addr = con.id();
 
-                    let data = TransportData::Connected(addr.addr_hash(&mut hasher));
+                    let data = TransportData::Connected(addr.into());
                     sender.send(data);
                 } else {
                     // TODO: error codes
@@ -143,13 +157,6 @@ impl QuicServer {
     }
 }
 
-#[derive(Resource)]
-pub struct QuicClientConfig {
-    max_connections: usize,
-}
-
-impl QuicClientConfig {
-    pub fn max_connections(&self) -> usize {
-        self.max_connections
-    }
+fn server_addr(port: u16) -> SocketAddr {
+    SocketAddr::new(SERVER_IP, port)
 }
