@@ -92,6 +92,7 @@ impl QuicServer {
         new_conns: Sender<SendStream>,
         bevy_new_conns: Sender<StreamId>,
     ) {
+        let mut rec_streams = Vec::new();
         let mut connections = Vec::new();
 
         'running: loop {
@@ -100,7 +101,7 @@ impl QuicServer {
 
                 if let Ok(Some(stream)) = con.accept_bidirectional_stream().await {
                     let (rec, send) = stream.split();
-                    connections.push(rec);
+                    rec_streams.push(rec);
 
                     let new_stream_id = send.stream_id();
 
@@ -123,9 +124,11 @@ impl QuicServer {
                     // TODO: error codes
                     con.close(99_u32.into());
                 }
+
+                connections.push(con);
             }
 
-            for con in connections.iter_mut() {
+            for con in rec_streams.iter_mut() {
                 if let Ok(Some(data)) = con.receive().await {
                     let transport = TransportData::ReceivedData(data);
                     sender
