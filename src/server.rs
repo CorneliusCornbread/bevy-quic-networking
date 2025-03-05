@@ -21,11 +21,10 @@ use tokio::{
 };
 
 use crate::{
-    common::{AddrHash, ConnectionId, TransportData},
+    common::{IntoStreamId, StreamId, TransportData},
     TokioRuntime,
 };
 
-const NEW_CONN_BATCH_SIZE: usize = 5;
 const SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
 #[derive(Component)]
@@ -33,7 +32,7 @@ pub struct QuicServer {
     runtime: tokio::runtime::Handle,
     socket_rec_channel: Receiver<TransportData>,
     socket_send_channel: Sender<Bytes>,
-    connection_rec_channel: Receiver<ConnectionId>,
+    connection_rec_channel: Receiver<StreamId>,
     stream: Option<Arc<BidirectionalStream>>,
     send_task: JoinHandle<()>,
     rec_task: JoinHandle<()>,
@@ -91,7 +90,7 @@ impl QuicServer {
         mut server: Server,
         sender: Sender<TransportData>,
         new_conns: Sender<SendStream>,
-        bevy_new_conns: Sender<ConnectionId>,
+        bevy_new_conns: Sender<StreamId>,
     ) {
         let mut connections = Vec::new();
 
@@ -103,21 +102,23 @@ impl QuicServer {
                     let (rec, send) = stream.split();
                     connections.push(rec);
 
-                    // TODO: change the sender to have a custom StreamId type
+                    let new_stream_id = send.stream_id();
+
                     bevy_new_conns
-                        .send(send.id().into())
+                        .send(new_stream_id)
                         .await
-                        .expect("Error sending new connection to Bevy thread");
+                        .expect("Error sending new stream to Bevy thread");
 
                     new_conns
                         .send(send)
                         .await
-                        .expect("Error handling new connection");
+                        .expect("Error handling new stream");
 
-                    let addr = con.id();
-
-                    let data = TransportData::Connected(addr.into());
-                    sender.send(data);
+                    let data = TransportData::Connected(new_stream_id);
+                    sender
+                        .send(data)
+                        .await
+                        .expect("Error sending transport stream id");
                 } else {
                     // TODO: error codes
                     con.close(99_u32.into());
