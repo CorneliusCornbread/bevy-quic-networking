@@ -12,8 +12,10 @@ use bevy::{
     prelude::{Resource, World},
 };
 use s2n_quic::{
+    connection::Handle,
+    provider::event::events::ConnectionClosed,
     stream::{BidirectionalStream, SendStream},
-    Server,
+    Connection, Server,
 };
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
@@ -99,7 +101,7 @@ impl QuicServer {
             while let Some(mut con) = server.accept().await {
                 let _ = con.keep_alive(true);
 
-                if let Ok(Some(stream)) = con.accept_bidirectional_stream().await {
+                if let Ok(stream) = con.open_bidirectional_stream().await {
                     let (rec, send) = stream.split();
                     rec_streams.push(rec);
 
@@ -152,9 +154,32 @@ impl QuicServer {
             }
 
             while let Some(message) = receiver.recv().await {
-                for conn in connections.iter_mut() {
+                let mut i = 0;
+                while i < connections.len() {}
+
+                for conn in connections.iter_mut().enumerate() {
                     // TODO: error handling/logging
-                    let _err = conn.send(message.clone());
+                    let stream = conn.1;
+                    let send_res = stream.send(message.clone()).await;
+
+                    if let Err(err) = send_res {
+                        match err {
+                            s2n_quic::stream::Error::InvalidStream { source, .. } => todo!(),
+                            s2n_quic::stream::Error::StreamReset { error, source, .. } => todo!(),
+                            s2n_quic::stream::Error::SendAfterFinish { source, .. } => todo!(),
+                            s2n_quic::stream::Error::MaxStreamDataSizeExceeded {
+                                source, ..
+                            } => {
+                                todo!()
+                            }
+                            s2n_quic::stream::Error::ConnectionError { error, .. } => todo!(),
+                            s2n_quic::stream::Error::NonReadable { source, .. } => todo!(),
+                            s2n_quic::stream::Error::NonWritable { source, .. } => todo!(),
+                            s2n_quic::stream::Error::SendingBlocked { source, .. } => todo!(),
+                            s2n_quic::stream::Error::NonEmptyOutput { source, .. } => todo!(),
+                            _ => todo!(),
+                        }
+                    }
                 }
             }
         }
