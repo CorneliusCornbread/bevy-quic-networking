@@ -153,9 +153,10 @@ impl QuicServer {
             }
 
             while let Some(message) = receiver.recv().await {
-                let mut i = 0;
+                let mut i = connections.len();
 
-                while i < connections.len() {
+                while i > 0 {
+                    i -= 1;
                     // TODO: error handling/logging
                     let (stream_id, stream) = connections
                         .get_index_mut(i)
@@ -191,7 +192,6 @@ impl QuicServer {
                             }
                         }
                     }
-                    i += 1;
                 }
             }
         }
