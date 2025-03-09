@@ -11,6 +11,7 @@ use bevy::{
     ecs::component::Component,
     prelude::{Resource, World},
 };
+use indexmap::IndexMap;
 use s2n_quic::{
     connection::Handle,
     provider::event::events::ConnectionClosed,
@@ -38,7 +39,6 @@ pub struct QuicServer {
     stream: Option<Arc<BidirectionalStream>>,
     send_task: JoinHandle<()>,
     rec_task: JoinHandle<()>,
-    hasher: AHasher,
     max_connections: usize,
 }
 
@@ -81,7 +81,6 @@ impl QuicServer {
             send_task,
             rec_task,
             stream: None,
-            hasher: AHasher::default(),
             max_connections,
         };
 
@@ -146,40 +145,53 @@ impl QuicServer {
         mut receiver: Receiver<Bytes>,
         mut new_conns: Receiver<SendStream>,
     ) {
-        let mut connections = Vec::new();
+        let mut connections: IndexMap<u64, SendStream> = IndexMap::new();
 
         'running: loop {
             while let Some(conn) = new_conns.recv().await {
-                connections.push(conn);
+                connections.insert(*conn.stream_id(), conn);
             }
 
             while let Some(message) = receiver.recv().await {
                 let mut i = 0;
-                while i < connections.len() {}
 
-                for conn in connections.iter_mut().enumerate() {
+                while i < connections.len() {
                     // TODO: error handling/logging
-                    let stream = conn.1;
+                    let (stream_id, stream) = connections
+                        .get_index_mut(i)
+                        .expect("Index overflowed connections buffer for send task. Has the connections buffer been modified on another thread?");
+                    // TODO: change expect to be more error friendly breaking of while loop instead of a panic
+
                     let send_res = stream.send(message.clone()).await;
 
                     if let Err(err) = send_res {
                         match err {
-                            s2n_quic::stream::Error::InvalidStream { source, .. } => todo!(),
-                            s2n_quic::stream::Error::StreamReset { error, source, .. } => todo!(),
-                            s2n_quic::stream::Error::SendAfterFinish { source, .. } => todo!(),
+                            s2n_quic::stream::Error::StreamReset { error, source, .. } => {
+                                // TODO: retry send later
+                            }
+                            s2n_quic::stream::Error::InvalidStream { source, .. }
+                            | s2n_quic::stream::Error::SendAfterFinish { source, .. } => {
+                                // Stream is dead, drop all data for it and remove it
+                                connections.swap_remove_index(i);
+                            }
                             s2n_quic::stream::Error::MaxStreamDataSizeExceeded {
                                 source, ..
-                            } => {
-                                todo!()
-                            }
+                            } => todo!(),
                             s2n_quic::stream::Error::ConnectionError { error, .. } => todo!(),
-                            s2n_quic::stream::Error::NonReadable { source, .. } => todo!(),
-                            s2n_quic::stream::Error::NonWritable { source, .. } => todo!(),
-                            s2n_quic::stream::Error::SendingBlocked { source, .. } => todo!(),
-                            s2n_quic::stream::Error::NonEmptyOutput { source, .. } => todo!(),
-                            _ => todo!(),
+                            s2n_quic::stream::Error::SendingBlocked { source, .. } => {
+                                // TODO: create some smaller message buffer system to handle this case
+                            }
+                            s2n_quic::stream::Error::NonReadable { source, .. }
+                            | s2n_quic::stream::Error::NonWritable { source, .. }
+                            | s2n_quic::stream::Error::NonEmptyOutput { source, .. } => {
+                                // TODO: unexpected error logging
+                            }
+                            _ => {
+                                // TODO: unexpected error logging
+                            }
                         }
                     }
+                    i += 1;
                 }
             }
         }
