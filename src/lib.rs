@@ -1,9 +1,10 @@
 use bevy::{
-    app::Plugin,
+    app::{Plugin, Update},
     log::info,
     prelude::{Deref, DerefMut, Resource},
 };
 use bevy_transport::{config::NetworkConfig, TransportPlugin};
+use server::drain_messages;
 use tokio::runtime::Runtime;
 
 pub mod common;
@@ -23,6 +24,8 @@ impl Plugin for QuicPlugin {
             app.insert_resource(NetworkConfig::new(self.tick_rate));
             app.init_resource::<TokioRuntime>();
         }
+
+        app.add_systems(Update, drain_messages);
     }
 }
 

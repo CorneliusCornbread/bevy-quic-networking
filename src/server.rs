@@ -3,12 +3,14 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     str::FromStr,
     sync::Arc,
+    time::Instant,
 };
 
-use aeronet::io::bytes::Bytes;
+use aeronet::io::{bytes::Bytes, packet::RecvPacket, Session};
 use ahash::AHasher;
 use bevy::{
-    ecs::component::Component,
+    ecs::{component::Component, system::Query},
+    log::error,
     prelude::{Resource, World},
 };
 use indexmap::IndexMap;
@@ -29,8 +31,15 @@ use crate::{
 };
 
 const SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+const CHANNEL_BUFF_SIZE: usize = 64;
+const MIN_MTU: usize = 1024;
+
+fn new_session() -> Session {
+    Session::new(Instant::now(), MIN_MTU)
+}
 
 #[derive(Component)]
+#[require(Session(new_session))]
 pub struct QuicServer {
     runtime: tokio::runtime::Handle,
     socket_rec_channel: Receiver<TransportData>,
@@ -54,10 +63,10 @@ impl QuicServer {
             .handle()
             .clone();
 
-        let (outbount_sender, outbound_receiver) = mpsc::channel(32);
-        let (inbound_sender, inbound_receiver) = mpsc::channel(32);
-        let (new_conn_sender, new_conn_receiver) = mpsc::channel(32);
-        let (bevy_new_conn_sender, bevy_new_conn_receiver) = mpsc::channel(32);
+        let (outbount_sender, outbound_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
+        let (inbound_sender, inbound_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
+        let (new_conn_sender, new_conn_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
+        let (bevy_new_conn_sender, bevy_new_conn_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
 
         let send_task = runtime.spawn(async move {
             Self::outbound_send_task(outbound_receiver, new_conn_receiver).await
@@ -158,7 +167,7 @@ impl QuicServer {
                 while i > 0 {
                     i -= 1;
                     // TODO: error handling/logging
-                    let (stream_id, stream) = connections
+                    let (_stream_id, stream) = connections
                         .get_index_mut(i)
                         .expect("Index overflowed connections buffer for send task. Has the connections buffer been modified on another thread?");
                     // TODO: change expect to be more error friendly breaking of while loop instead of a panic
@@ -200,4 +209,39 @@ impl QuicServer {
 
 fn server_addr(port: u16) -> SocketAddr {
     SocketAddr::new(SERVER_IP, port)
+}
+
+/// Drains all the messages between our IO and our Session layer, sending queued data and receiving queued data.
+pub(crate) fn drain_messages(mut sessions: Query<(&mut Session, &mut QuicServer)>) {
+    for entity in sessions.iter_mut() {
+        let mut session = entity.0;
+        let mut server = entity.1;
+
+        for data in session.send.drain(..) {
+            let send_res = server.socket_send_channel.blocking_send(data);
+
+            if let Err(e) = send_res {
+                error!(
+                    "Internal error sending data via socket channel, this data will be not be sent: {}",
+                    e
+                )
+            }
+        }
+
+        // blocking_recv will block if there are no messages to be processed until a message is sent
+        if server.socket_rec_channel.is_empty() {
+            continue;
+        }
+
+        while let Some(TransportData::ReceivedData(data)) =
+            server.socket_rec_channel.blocking_recv()
+        {
+            let packet = RecvPacket {
+                recv_at: Instant::now(), // TODO: we should just construct this packet within the async function, but I am lazy :3
+                payload: data,
+            };
+
+            session.recv.push(packet);
+        }
+    }
 }
