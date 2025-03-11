@@ -17,6 +17,8 @@ pub struct QuicPlugin {
 impl Plugin for QuicPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         // NOTE: If bevy plugin dependencies ever get added this may not be necessary
+        // TODO: change this transport plugin and config information to be something to upstream into
+        // Aeronet directly
         if !app.is_plugin_added::<TransportPlugin>() {
             app.add_plugins(TransportPlugin::new(true, self.tick_rate));
         } else {

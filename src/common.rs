@@ -1,4 +1,4 @@
-use aeronet::io::bytes::Bytes;
+use aeronet::io::{bytes::Bytes, packet::RecvPacket};
 use ahash::AHasher;
 use bevy::prelude::Deref;
 use s2n_quic::stream::SendStream;
@@ -15,7 +15,7 @@ pub enum TransportData {
     ConnectFailed(Box<dyn Error + Send>),
     ConnectInProgress,
     FailedStream(Box<dyn Error + Send>),
-    ReceivedData(Bytes),
+    ReceivedData(RecvPacket),
 }
 
 pub enum IpAddrBytes {
@@ -41,7 +41,7 @@ impl From<IpAddr> for IpAddrBytes {
     }
 }
 
-#[derive(Deref, Debug, Clone, Copy)]
+#[derive(Deref, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct StreamId(u64);
 
 impl From<&SendStream> for StreamId {

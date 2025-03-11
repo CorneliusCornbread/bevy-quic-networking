@@ -1,28 +1,25 @@
 use std::{
     error::Error,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    str::FromStr,
     sync::Arc,
     time::Instant,
 };
 
 use aeronet::io::{bytes::Bytes, packet::RecvPacket, Session};
-use ahash::AHasher;
 use bevy::{
     ecs::{component::Component, system::Query},
     log::error,
-    prelude::{Resource, World},
+    prelude::World,
 };
 use indexmap::IndexMap;
 use s2n_quic::{
-    connection::Handle,
-    provider::event::events::ConnectionClosed,
     stream::{BidirectionalStream, SendStream},
-    Connection, Server,
+    Server,
 };
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
+    time::Instant as TokioInstant,
 };
 
 use crate::{
@@ -45,10 +42,10 @@ pub struct QuicServer {
     socket_rec_channel: Receiver<TransportData>,
     socket_send_channel: Sender<Bytes>,
     connection_rec_channel: Receiver<StreamId>,
-    stream: Option<Arc<BidirectionalStream>>,
     send_task: JoinHandle<()>,
     rec_task: JoinHandle<()>,
     max_connections: usize,
+    tracked_connections: IndexMap<StreamId, (bool, Instant)>,
 }
 
 impl QuicServer {
@@ -89,8 +86,8 @@ impl QuicServer {
             connection_rec_channel: bevy_new_conn_receiver,
             send_task,
             rec_task,
-            stream: None,
             max_connections,
+            tracked_connections: IndexMap::new(),
         };
 
         Ok(quic_server)
@@ -140,7 +137,12 @@ impl QuicServer {
 
             for con in rec_streams.iter_mut() {
                 if let Ok(Some(data)) = con.receive().await {
-                    let transport = TransportData::ReceivedData(data);
+                    let packet = RecvPacket {
+                        recv_at: TokioInstant::now().into_std(),
+                        payload: data,
+                    };
+
+                    let transport = TransportData::ReceivedData(packet);
                     sender
                         .send(transport)
                         .await
@@ -154,11 +156,11 @@ impl QuicServer {
         mut receiver: Receiver<Bytes>,
         mut new_conns: Receiver<SendStream>,
     ) {
-        let mut connections: IndexMap<u64, SendStream> = IndexMap::new();
+        let mut connections: IndexMap<StreamId, SendStream> = IndexMap::new();
 
         'running: loop {
             while let Some(conn) = new_conns.recv().await {
-                connections.insert(*conn.stream_id(), conn);
+                connections.insert(conn.stream_id(), conn);
             }
 
             while let Some(message) = receiver.recv().await {
@@ -236,12 +238,14 @@ pub(crate) fn drain_messages(mut sessions: Query<(&mut Session, &mut QuicServer)
         while let Some(TransportData::ReceivedData(data)) =
             server.socket_rec_channel.blocking_recv()
         {
-            let packet = RecvPacket {
-                recv_at: Instant::now(), // TODO: we should just construct this packet within the async function, but I am lazy :3
-                payload: data,
-            };
+            session.recv.push(data);
+        }
 
-            session.recv.push(packet);
+        while let Some(new_id) = server.connection_rec_channel.blocking_recv() {
+            // TODO: add more information about connections
+            server
+                .tracked_connections
+                .insert(new_id, (true, Instant::now()));
         }
     }
 }
