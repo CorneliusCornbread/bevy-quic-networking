@@ -1,24 +1,17 @@
 use std::{
     error::Error,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
     time::Instant,
 };
 
 use aeronet::io::{bytes::Bytes, packet::RecvPacket, Session};
 use bevy::{
-    ecs::{
-        component::Component,
-        system::{Query, ResMut, Resource},
-    },
+    ecs::system::{Commands, Query, ResMut, Resource},
     log::error,
     prelude::World,
 };
 use indexmap::IndexMap;
-use s2n_quic::{
-    stream::{BidirectionalStream, SendStream},
-    Server,
-};
+use s2n_quic::{stream::SendStream, Server};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -26,7 +19,7 @@ use tokio::{
 };
 
 use crate::{
-    common::{IntoStreamId, StreamId, TransportData},
+    common::{IntoStreamId, QuicSessionInternal, StreamId, TransportData},
     TokioRuntime,
 };
 
@@ -38,7 +31,7 @@ const MIN_MTU: usize = 1024;
 pub struct QuicServer {
     runtime: tokio::runtime::Handle,
     socket_rec_channel: Receiver<TransportData>,
-    socket_send_channel: Sender<Bytes>,
+    socket_send_channel: Sender<(Bytes, Option<StreamId>)>,
     connection_rec_channel: Receiver<StreamId>,
     send_task: JoinHandle<()>,
     rec_task: JoinHandle<()>,
@@ -151,7 +144,7 @@ impl QuicServer {
     }
 
     async fn outbound_send_task(
-        mut receiver: Receiver<Bytes>,
+        mut receiver: Receiver<(Bytes, Option<StreamId>)>,
         mut new_conns: Receiver<SendStream>,
     ) {
         let mut connections: IndexMap<StreamId, SendStream> = IndexMap::new();
@@ -161,7 +154,20 @@ impl QuicServer {
                 connections.insert(conn.stream_id(), conn);
             }
 
-            while let Some(message) = receiver.recv().await {
+            'message_loop: while let Some(message) = receiver.recv().await {
+                // Target message
+                if let Some(target_stream_id) = message.1 {
+                    if let Some(stream) = connections.get_mut(&target_stream_id) {
+                        // TODO: see error handling below, this will need to be handled in the same way
+                        let _send_res = stream.send(message.0.clone()).await;
+                    }
+
+                    // TODO: log error if we can't find the relevant stream
+
+                    continue 'message_loop;
+                }
+
+                // Broadcast message
                 let mut i = connections.len();
 
                 while i > 0 {
@@ -172,8 +178,9 @@ impl QuicServer {
                         .expect("Index overflowed connections buffer for send task. Has the connections buffer been modified on another thread?");
                     // TODO: change expect to be more error friendly breaking of while loop instead of a panic
 
-                    let send_res = stream.send(message.clone()).await;
+                    let send_res = stream.send(message.0.clone()).await;
 
+                    // TODO: move this handling to function call
                     if let Err(err) = send_res {
                         match err {
                             s2n_quic::stream::Error::StreamReset { error, source, .. } => {
@@ -212,12 +219,17 @@ fn server_addr(port: u16) -> SocketAddr {
 }
 
 /// Drains all the messages between our IO and our Session layer, sending queued data and receiving queued data.
-pub(crate) fn drain_messages(mut sessions: Query<&mut Session>, mut server: ResMut<QuicServer>) {
+pub(crate) fn drain_messages(
+    mut commands: Commands,
+    mut sessions: Query<(&mut Session, &QuicSessionInternal)>,
+    mut server: ResMut<QuicServer>,
+) {
     for entity in sessions.iter_mut() {
-        let mut session = entity;
+        let mut session = entity.0;
+        let stream_id = entity.1 .0;
 
         for data in session.send.drain(..) {
-            let send_res = server.socket_send_channel.blocking_send(data);
+            let send_res = server.socket_send_channel.blocking_send((data, stream_id));
 
             if let Err(e) = send_res {
                 error!(
@@ -239,10 +251,24 @@ pub(crate) fn drain_messages(mut sessions: Query<&mut Session>, mut server: ResM
         }
 
         while let Some(new_id) = server.connection_rec_channel.blocking_recv() {
+            let conn_instant = Instant::now();
+
             // TODO: add more information about connections
             server
                 .tracked_connections
-                .insert(new_id, (true, Instant::now()));
+                .insert(new_id, (true, conn_instant));
+
+            commands.spawn((
+                Session::new(conn_instant, MIN_MTU),
+                QuicSessionInternal(Some(new_id)),
+            ));
         }
     }
+}
+
+pub(crate) fn open_broadcast_session(mut commands: Commands) {
+    commands.spawn((
+        Session::new(Instant::now(), MIN_MTU),
+        QuicSessionInternal(None),
+    ));
 }

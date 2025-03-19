@@ -1,8 +1,9 @@
 use aeronet::io::packet::RecvPacket;
+use aeronet::io::Session;
+use bevy::ecs::component::Component;
 use bevy::prelude::Deref;
 use s2n_quic::stream::SendStream;
 use std::error::Error;
-use std::net::IpAddr;
 
 // TODO: Move connect, stream information, and data information into their own enums
 #[derive(Debug)]
@@ -14,28 +15,10 @@ pub enum TransportData {
     ReceivedData(RecvPacket),
 }
 
-pub enum IpAddrBytes {
-    V4([u8; 4]),
-    V6([u8; 16]),
-}
+pub type QuicSession = QuicSessionInternal;
 
-impl IpAddrBytes {
-    pub fn to_vec(&self) -> Vec<u8> {
-        match self {
-            IpAddrBytes::V4(ipv4_addr) => ipv4_addr.to_vec(),
-            IpAddrBytes::V6(ipv6_addr) => ipv6_addr.to_vec(),
-        }
-    }
-}
-
-impl From<IpAddr> for IpAddrBytes {
-    fn from(value: IpAddr) -> Self {
-        match value {
-            IpAddr::V4(ipv4_addr) => IpAddrBytes::V4(ipv4_addr.octets()),
-            IpAddr::V6(ipv6_addr) => IpAddrBytes::V6(ipv6_addr.octets()),
-        }
-    }
-}
+#[derive(Component)]
+pub(crate) struct QuicSessionInternal(pub Option<StreamId>);
 
 #[derive(Deref, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct StreamId(u64);
