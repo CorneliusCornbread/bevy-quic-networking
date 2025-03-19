@@ -7,7 +7,10 @@ use std::{
 
 use aeronet::io::{bytes::Bytes, packet::RecvPacket, Session};
 use bevy::{
-    ecs::{component::Component, system::Query},
+    ecs::{
+        component::Component,
+        system::{Query, ResMut, Resource},
+    },
     log::error,
     prelude::World,
 };
@@ -31,12 +34,7 @@ const SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 const CHANNEL_BUFF_SIZE: usize = 64;
 const MIN_MTU: usize = 1024;
 
-fn new_session() -> Session {
-    Session::new(Instant::now(), MIN_MTU)
-}
-
-#[derive(Component)]
-#[require(Session(new_session))]
+#[derive(Resource)]
 pub struct QuicServer {
     runtime: tokio::runtime::Handle,
     socket_rec_channel: Receiver<TransportData>,
@@ -214,10 +212,9 @@ fn server_addr(port: u16) -> SocketAddr {
 }
 
 /// Drains all the messages between our IO and our Session layer, sending queued data and receiving queued data.
-pub(crate) fn drain_messages(mut sessions: Query<(&mut Session, &mut QuicServer)>) {
+pub(crate) fn drain_messages(mut sessions: Query<&mut Session>, mut server: ResMut<QuicServer>) {
     for entity in sessions.iter_mut() {
-        let mut session = entity.0;
-        let mut server = entity.1;
+        let mut session = entity;
 
         for data in session.send.drain(..) {
             let send_res = server.socket_send_channel.blocking_send(data);

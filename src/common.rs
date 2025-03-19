@@ -1,12 +1,8 @@
-use aeronet::io::{bytes::Bytes, packet::RecvPacket};
-use ahash::AHasher;
+use aeronet::io::packet::RecvPacket;
 use bevy::prelude::Deref;
 use s2n_quic::stream::SendStream;
-use std::{
-    error::Error,
-    hash::Hasher,
-    net::{IpAddr, SocketAddr},
-};
+use std::error::Error;
+use std::net::IpAddr;
 
 // TODO: Move connect, stream information, and data information into their own enums
 #[derive(Debug)]
