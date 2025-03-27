@@ -229,7 +229,9 @@ pub(crate) fn drain_messages(
         let stream_id = entity.1 .0;
 
         for data in session.send.drain(..) {
-            let send_res = server.socket_send_channel.blocking_send((data, stream_id));
+            let send_res = server
+                .socket_send_channel
+                .blocking_send((data, Some(stream_id)));
 
             if let Err(e) = send_res {
                 error!(
@@ -260,15 +262,13 @@ pub(crate) fn drain_messages(
 
             commands.spawn((
                 Session::new(conn_instant, MIN_MTU),
-                QuicSessionInternal(Some(new_id)),
+                QuicSessionInternal(new_id),
             ));
         }
     }
 }
 
-pub(crate) fn open_broadcast_session(mut commands: Commands) {
-    commands.spawn((
-        Session::new(Instant::now(), MIN_MTU),
-        QuicSessionInternal(None),
-    ));
+pub(crate) fn open_broadcast(mut commands: Commands) {
+    use aeronet::io::server::Server as AeronetServer;
+    commands.spawn(AeronetServer::new(Instant::now()));
 }
