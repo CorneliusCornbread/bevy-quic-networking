@@ -1,8 +1,8 @@
 use bevy::{
     app::{Plugin, Update},
     ecs::{
+        resource::Resource,
         schedule::ScheduleLabel,
-        system::Resource,
         world::{Mut, World},
     },
     log::warn,

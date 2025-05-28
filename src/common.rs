@@ -15,11 +15,6 @@ pub enum TransportData {
     ReceivedData(RecvPacket),
 }
 
-pub type QuicSession = QuicSessionInternal;
-
-#[derive(Component)]
-pub(crate) struct QuicSessionInternal(pub(crate) StreamId);
-
 #[derive(Deref, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct StreamId(u64);
 

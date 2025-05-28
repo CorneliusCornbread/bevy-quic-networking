@@ -6,7 +6,10 @@ use std::{
 
 use aeronet::io::{bytes::Bytes, packet::RecvPacket, Session};
 use bevy::{
-    ecs::system::{Commands, Query, ResMut, Resource},
+    ecs::{
+        resource::Resource,
+        system::{Commands, Query, Res, ResMut},
+    },
     log::error,
     prelude::World,
 };
@@ -19,7 +22,8 @@ use tokio::{
 };
 
 use crate::{
-    common::{IntoStreamId, QuicSessionInternal, StreamId, TransportData},
+    common::{IntoStreamId, StreamId, TransportData},
+    session::QuicSessionInternal,
     TokioRuntime,
 };
 
@@ -223,10 +227,11 @@ pub(crate) fn drain_messages(
     mut commands: Commands,
     mut sessions: Query<(&mut Session, &QuicSessionInternal)>,
     mut server: ResMut<QuicServer>,
+    runtime: Res<TokioRuntime>,
 ) {
     for entity in sessions.iter_mut() {
         let mut session = entity.0;
-        let stream_id = entity.1 .0;
+        let stream_id = entity.1.id;
 
         for data in session.send.drain(..) {
             let send_res = server
@@ -262,7 +267,7 @@ pub(crate) fn drain_messages(
 
             commands.spawn((
                 Session::new(conn_instant, MIN_MTU),
-                QuicSessionInternal(new_id),
+                //QuicSessionInternal::new(runtime.handle().clone(), stream_id), // TODO: fix this, instantiate it properly
             ));
         }
     }

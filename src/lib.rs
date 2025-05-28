@@ -8,7 +8,9 @@ use server::drain_messages;
 use tokio::runtime::Runtime;
 
 pub mod common;
+pub mod connection;
 pub mod server;
+pub mod session;
 
 pub struct QuicPlugin {
     tick_rate: u16,
