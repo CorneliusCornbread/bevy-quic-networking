@@ -1,14 +1,14 @@
 [package]
 name = "bevy-quic-networking"
-version = "0.1.0"
+version = "0.16.0"
 edition = "2024"
 
 [dependencies]
 aeronet = "0.14.0"
 bevy = "0.16.0"
 bevy_transport = { path = "crates/bevy_transport" }
-s2n-quic = "1.58.0"
+s2n-quic = "1.62.0"
 thiserror = "2.0.12"
-tokio = { version = "1.45.1", features = ["sync", "rt-multi-thread", "macros"] }
+tokio = { version = "1.46.1", features = ["sync", "rt-multi-thread", "macros"] }
 ahash = "0.8.12"
 indexmap = "2.9.0"

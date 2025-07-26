@@ -3,12 +3,12 @@ use bevy::{
     log::info,
     prelude::{Deref, DerefMut, Resource},
 };
-use bevy_transport::{config::NetworkConfig, TransportPlugin};
+use bevy_transport::{TransportPlugin, config::NetworkConfig};
 use server::drain_messages;
 use tokio::runtime::Runtime;
 
 pub mod common;
-pub mod connection;
+pub mod endpoint;
 pub mod server;
 pub mod session;
 
@@ -24,7 +24,9 @@ impl Plugin for QuicPlugin {
         if !app.is_plugin_added::<TransportPlugin>() {
             app.add_plugins(TransportPlugin::new(true, self.tick_rate));
         } else {
-            info!("Transport plugin was already initialized. Make sure the system for NetworkUpdate is handled, either by the default transport or your own.");
+            info!(
+                "Transport plugin was already initialized. Make sure the system for NetworkUpdate is handled, either by the default transport or your own."
+            );
             app.insert_resource(NetworkConfig::new(self.tick_rate));
             app.init_resource::<TokioRuntime>();
         }

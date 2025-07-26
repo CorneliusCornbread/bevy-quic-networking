@@ -11,7 +11,7 @@ use s2n_quic::{
 };
 use tokio::{
     runtime::Handle,
-    sync::mpsc::{self, error::TrySendError, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, error::TrySendError},
     task::JoinHandle,
     time::Instant as TokioInstant,
 };
@@ -20,8 +20,6 @@ use crate::common::StreamId;
 
 const CHANNEL_BUFF_SIZE: usize = 256;
 const CONNECTION_CLOSED_ERR_CODE: u64 = 200;
-
-pub type QuicSession = QuicSessionInternal;
 
 enum SendControlMessage {
     CloseAndQuit,
@@ -33,7 +31,7 @@ enum RecControlMessage {
 }
 
 #[derive(Component)]
-pub(crate) struct QuicSessionInternal {
+pub(crate) struct QuicSession {
     runtime: Handle,
     send_task: JoinHandle<()>,
     rec_task: JoinHandle<()>,
@@ -46,7 +44,7 @@ pub(crate) struct QuicSessionInternal {
     pub(crate) id: StreamId,
 }
 
-impl QuicSessionInternal {
+impl QuicSession {
     pub(crate) fn new(runtime: Handle, id: StreamId, stream: BidirectionalStream) -> Self {
         let (rec, send): (ReceiveStream, SendStream) = stream.split();
 
@@ -113,7 +111,9 @@ async fn outbound_send_task(
                     match send.close().await {
                         Ok(_) => info!("Send stream closed, exiting send stream task..."),
                         Err(e) => {
-                            warn!("Send stream errored when closing: {e}\n Exiting send stream task...")
+                            warn!(
+                                "Send stream errored when closing: {e}\n Exiting send stream task..."
+                            )
                         }
                     }
                     break_flag = true;
@@ -178,7 +178,9 @@ async fn rec_task(
                     match rec.stop_sending(*code) {
                         Ok(_) => info!("Send stream closed, exiting send stream task..."),
                         Err(e) => {
-                            warn!("Send stream errored when closing: {e}\n Exiting send stream task...")
+                            warn!(
+                                "Send stream errored when closing: {e}\n Exiting send stream task..."
+                            )
                         }
                     }
                     break_flag = true;
@@ -225,7 +227,9 @@ trait HandleChannelError {
 impl<T> HandleChannelError for Result<(), TrySendError<T>> {
     fn handle_err(&self) {
         if let Err(send_err) = self {
-            error!("Error buffer for async task is full, the following error will be dropped: {send_err}");
+            error!(
+                "Error buffer for async task is full, the following error will be dropped: {send_err}"
+            );
         }
     }
 }

@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use aeronet::io::{bytes::Bytes, packet::RecvPacket, Session};
+use aeronet::io::{Session, bytes::Bytes, packet::RecvPacket};
 use bevy::{
     ecs::{
         resource::Resource,
@@ -14,7 +14,7 @@ use bevy::{
     prelude::World,
 };
 use indexmap::IndexMap;
-use s2n_quic::{stream::SendStream, Server};
+use s2n_quic::{Server, stream::SendStream};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -22,9 +22,9 @@ use tokio::{
 };
 
 use crate::{
-    common::{IntoStreamId, StreamId, TransportData},
-    session::QuicSessionInternal,
     TokioRuntime,
+    common::{IntoStreamId, StreamId, TransportData},
+    session::QuicSession,
 };
 
 const SERVER_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
@@ -225,7 +225,7 @@ fn server_addr(port: u16) -> SocketAddr {
 /// Drains all the messages between our IO and our Session layer, sending queued data and receiving queued data.
 pub(crate) fn drain_messages(
     mut commands: Commands,
-    mut sessions: Query<(&mut Session, &QuicSessionInternal)>,
+    mut sessions: Query<(&mut Session, &QuicSession)>,
     mut server: ResMut<QuicServer>,
     runtime: Res<TokioRuntime>,
 ) {
