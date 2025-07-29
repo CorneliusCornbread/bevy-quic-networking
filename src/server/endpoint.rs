@@ -1,3 +1,5 @@
+use aeronet::io::server::ServerEndpoint;
+use bevy::ecs::component::Component;
 use s2n_quic::{Connection, Server};
 use std::{
     error::Error,
@@ -14,6 +16,8 @@ use crate::status_code::StatusCode;
 
 const NEW_CONN_BUFF_SIZE: usize = 32;
 
+#[derive(Component)]
+#[require(ServerEndpoint)]
 pub struct QuicServerEndpoint {
     runtime: Handle,
     conn_task: JoinHandle<()>,
