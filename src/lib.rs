@@ -11,6 +11,9 @@ pub mod common;
 pub mod endpoint;
 pub mod server;
 pub mod session;
+pub mod status_code;
+
+pub use s2n_quic::Server;
 
 pub struct QuicPlugin {
     tick_rate: u16,

@@ -19,7 +19,6 @@ use tokio::{
 use crate::common::StreamId;
 
 const CHANNEL_BUFF_SIZE: usize = 256;
-const CONNECTION_CLOSED_ERR_CODE: u64 = 200;
 
 enum SendControlMessage {
     CloseAndQuit,
