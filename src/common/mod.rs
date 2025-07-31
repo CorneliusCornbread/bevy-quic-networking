@@ -4,6 +4,7 @@ use s2n_quic::stream::SendStream;
 use std::error::Error;
 use tokio::sync::mpsc::error::TrySendError;
 
+pub mod attempt;
 pub mod connection;
 pub mod status_code;
 pub mod stream;

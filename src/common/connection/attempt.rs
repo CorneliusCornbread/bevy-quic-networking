@@ -14,6 +14,7 @@ pub struct QuicConnectionAttempt {
     conn_task: Option<JoinHandle<Result<Connection, ConnectionError>>>,
     /// In the event that we have a failure with tokio, we store the error data here
     conn_join_error: Option<Arc<JoinError>>,
+    conn_error: Option<ConnectionError>,
 }
 
 impl QuicConnectionAttempt {
@@ -25,12 +26,17 @@ impl QuicConnectionAttempt {
             runtime,
             conn_task: Some(conn_task),
             conn_join_error: None,
+            conn_error: None,
         }
     }
 
     pub fn get_connection(&mut self) -> Result<QuicConnection, ConnectionCreationError> {
         if let Some(e) = &self.conn_join_error {
             return Err(ConnectionCreationError::Crashed(e.clone()));
+        }
+
+        if let Some(e) = &self.conn_error {
+            return Err(ConnectionCreationError::Failed(*e));
         }
 
         if self.conn_task.is_none() {
@@ -51,6 +57,7 @@ impl QuicConnectionAttempt {
             let res = join_res.unwrap();
 
             if let Err(e) = res {
+                self.conn_error = Some(e.clone());
                 return Err(ConnectionCreationError::Failed(e));
             }
 
