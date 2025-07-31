@@ -4,15 +4,11 @@ use bevy::{
     prelude::{Deref, DerefMut, Resource},
 };
 use bevy_transport::{TransportPlugin, config::NetworkConfig};
-use old_server::drain_messages;
 use tokio::runtime::Runtime;
 
 pub mod client;
 pub mod common;
-pub mod old_server;
 pub mod server;
-pub mod session;
-pub mod status_code;
 
 pub use s2n_quic::Server;
 
@@ -35,7 +31,7 @@ impl Plugin for QuicPlugin {
             app.init_resource::<TokioRuntime>();
         }
 
-        app.add_systems(Update, drain_messages);
+        //app.add_systems(Update, drain_messages);
     }
 }
 

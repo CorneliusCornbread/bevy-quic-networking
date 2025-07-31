@@ -12,7 +12,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::status_code::StatusCode;
+use crate::common::status_code::StatusCode;
 
 const NEW_CONN_BUFF_SIZE: usize = 32;
 

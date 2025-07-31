@@ -1,11 +1,12 @@
-use aeronet::io::Session;
 use aeronet::io::packet::RecvPacket;
-use bevy::ecs::component::Component;
-use bevy::ecs::world::FromWorld;
-use bevy::prelude::Deref;
+use bevy::{log::error, prelude::Deref};
 use s2n_quic::stream::SendStream;
 use std::error::Error;
-use tokio::runtime::Handle;
+use tokio::sync::mpsc::error::TrySendError;
+
+pub mod connection;
+pub mod status_code;
+pub mod stream;
 
 // TODO: Move connect, stream information, and data information into their own enums
 #[derive(Debug)]
@@ -42,20 +43,16 @@ impl IntoStreamId for SendStream {
     }
 }
 
-use crate::TokioRuntime;
-
-#[derive(Component)]
-pub(crate) struct ConnectionHandler {
-    runtime: Handle,
+pub(crate) trait HandleChannelError {
+    fn handle_err(&self);
 }
 
-impl FromWorld for ConnectionHandler {
-    fn from_world(world: &mut bevy::ecs::world::World) -> Self {
-        let runtime = world
-            .get_resource_or_init::<TokioRuntime>()
-            .handle()
-            .clone();
-
-        ConnectionHandler { runtime }
+impl<T> HandleChannelError for Result<(), TrySendError<T>> {
+    fn handle_err(&self) {
+        if let Err(send_err) = self {
+            error!(
+                "Error buffer for async task is full, the following error will be dropped: {send_err}"
+            );
+        }
     }
 }
