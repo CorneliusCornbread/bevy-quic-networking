@@ -10,13 +10,14 @@ use tokio::{runtime::Handle, sync::Mutex};
 
 use crate::common::{
     StreamId,
+    attempt::QuicActionAttempt,
     stream::{
-        QuicBidirectionalStreamAttempt, QuicSendStreamAttempt, receive::QuicReceiveStream,
-        send::QuicSendStream, session::QuicSession,
+        QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
+        session::QuicSession,
     },
 };
 
-pub mod attempt;
+pub type QuicConnectionAttempt = QuicActionAttempt<Connection>;
 
 #[derive(Component)]
 pub struct QuicConnection {

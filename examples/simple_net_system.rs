@@ -1,12 +1,12 @@
 use bevy::{
+    DefaultPlugins,
     app::App,
     log::info,
     prelude::PluginGroup,
     render::{
-        settings::{PowerPreference, WgpuSettings},
         RenderPlugin,
+        settings::{PowerPreference, WgpuSettings},
     },
-    DefaultPlugins,
 };
 use bevy_transport::{NetworkUpdate, TransportPlugin};
 

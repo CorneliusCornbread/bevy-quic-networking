@@ -21,7 +21,7 @@ pub(crate) struct QuicActionAttempt<T> {
 }
 
 impl<T> QuicActionAttempt<T> {
-    pub(crate) fn new(
+    pub fn new(
         handle: Handle,
         stream_id: StreamId,
         conn_task: JoinHandle<Result<T, ConnectionError>>,
@@ -34,7 +34,7 @@ impl<T> QuicActionAttempt<T> {
         }
     }
 
-    pub(crate) fn get_output(&mut self) -> Result<T, QuicActionError> {
+    pub fn get_output(&mut self) -> Result<T, QuicActionError> {
         if let Some(e) = &self.last_error {
             return Err(e.clone());
         }

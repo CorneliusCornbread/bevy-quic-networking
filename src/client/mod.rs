@@ -6,7 +6,7 @@ use s2n_quic::{
 };
 use tokio::runtime::Handle;
 
-use crate::common::connection::attempt::QuicConnectionAttempt;
+use crate::common::connection::QuicConnectionAttempt;
 
 #[derive(Component)]
 pub struct QuicClient {
@@ -25,7 +25,8 @@ impl QuicClient {
 
         let conn_task = self.runtime.spawn(create_connection(attempt));
 
-        QuicConnectionAttempt::new(self.runtime.clone(), conn_task)
+        // TODO: probably refactor the stream_id such that we have some client or server id
+        QuicConnectionAttempt::new(self.runtime.clone(), 0.into(), conn_task)
     }
 }
 
