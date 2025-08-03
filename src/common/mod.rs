@@ -1,8 +1,9 @@
 use aeronet::io::packet::RecvPacket;
-use bevy::{log::error, prelude::Deref};
-use s2n_quic::stream::SendStream;
+use bevy::log::error;
 use std::error::Error;
 use tokio::sync::mpsc::error::TrySendError;
+
+use crate::common::stream::StreamId;
 
 pub mod attempt;
 pub mod connection;
@@ -17,31 +18,6 @@ pub enum TransportData {
     ConnectInProgress,
     FailedStream(Box<dyn Error + Send>),
     ReceivedData(RecvPacket),
-}
-
-#[derive(Deref, Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct StreamId(u64);
-
-impl From<&SendStream> for StreamId {
-    fn from(value: &SendStream) -> Self {
-        value.stream_id()
-    }
-}
-
-impl From<u64> for StreamId {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-pub trait IntoStreamId {
-    fn stream_id(&self) -> StreamId;
-}
-
-impl IntoStreamId for SendStream {
-    fn stream_id(&self) -> StreamId {
-        StreamId(self.id())
-    }
 }
 
 pub(crate) trait HandleChannelError {

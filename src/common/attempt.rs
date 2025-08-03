@@ -8,29 +8,23 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 
-use crate::common::StreamId;
-
 #[derive(Component)]
 #[require(SessionEndpoint)]
-pub(crate) struct QuicActionAttempt<T> {
+pub(crate) struct QuicActionAttempt<T, T2> {
     runtime: Handle,
     conn_task: Option<JoinHandle<Result<T, ConnectionError>>>,
     /// In the event that we have a failure with tokio, we store the error data here
     last_error: Option<QuicActionError>,
-    stream_id: StreamId,
+    id: T2,
 }
 
-impl<T> QuicActionAttempt<T> {
-    pub fn new(
-        handle: Handle,
-        stream_id: StreamId,
-        conn_task: JoinHandle<Result<T, ConnectionError>>,
-    ) -> Self {
+impl<T, T2> QuicActionAttempt<T, T2> {
+    pub fn new(handle: Handle, id: T2, conn_task: JoinHandle<Result<T, ConnectionError>>) -> Self {
         Self {
             runtime: handle,
             conn_task: Some(conn_task),
             last_error: None,
-            stream_id,
+            id,
         }
     }
 

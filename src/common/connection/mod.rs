@@ -1,23 +1,24 @@
 use std::sync::Arc;
 
-use bevy::ecs::{component::Component, system::Commands};
-use s2n_quic::{
-    Connection,
-    connection::Error as ConnectionError,
-    stream::{BidirectionalStream, Stream},
+use bevy::{
+    ecs::{
+        component::Component,
+        system::{Commands, EntityCommands},
+    },
+    prelude::Deref,
 };
+use s2n_quic::{Connection, connection::Error as ConnectionError, stream::BidirectionalStream};
 use tokio::{runtime::Handle, sync::Mutex};
 
 use crate::common::{
-    StreamId,
     attempt::QuicActionAttempt,
     stream::{
-        QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
+        QuicBidirectionalStreamAttempt, StreamId, receive::QuicReceiveStream, send::QuicSendStream,
         session::QuicSession,
     },
 };
 
-pub type QuicConnectionAttempt = QuicActionAttempt<Connection>;
+pub type QuicConnectionAttempt = QuicActionAttempt<Connection, ConnectionId>;
 
 #[derive(Component)]
 pub struct QuicConnection {
@@ -33,15 +34,22 @@ impl QuicConnection {
         }
     }
 
-    pub fn open_bidrectional_stream(&self, mut commands: Commands, id: StreamId) {
+    pub fn open_bidrectional_stream<'a>(
+        &self,
+        commands: &'a mut Commands<'a, 'a>,
+        id: StreamId,
+    ) -> EntityCommands<'a> {
         let conn_task = self
             .runtime
             .spawn(open_bidirectional_task(self.connection.clone()));
 
-        commands.spawn((
+        let mut empty = commands.spawn_empty();
+        empty.insert((
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), id, conn_task),
             QuicSession::new(id),
         ));
+
+        empty
     }
 }
 
@@ -62,4 +70,13 @@ async fn open_bidirectional_task(
     let rec_stream = QuicReceiveStream::new(Handle::current(), rec);
 
     Ok((rec_stream, send_stream))
+}
+
+#[derive(Deref, Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct ConnectionId(u64);
+
+impl From<u64> for ConnectionId {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
 }
