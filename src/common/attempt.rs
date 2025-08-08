@@ -10,7 +10,7 @@ use tokio::{
 
 #[derive(Component)]
 #[require(SessionEndpoint)]
-pub(crate) struct QuicActionAttempt<T, T2> {
+pub struct QuicActionAttempt<T, T2> {
     runtime: Handle,
     conn_task: Option<JoinHandle<Result<T, ConnectionError>>>,
     /// In the event that we have a failure with tokio, we store the error data here
@@ -66,7 +66,7 @@ impl<T, T2> QuicActionAttempt<T, T2> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum QuicActionError {
     InProgress,
     Consumed,
