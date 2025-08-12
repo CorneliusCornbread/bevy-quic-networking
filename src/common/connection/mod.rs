@@ -34,22 +34,19 @@ impl QuicConnection {
         }
     }
 
-    pub fn open_bidrectional_stream<'a>(
+    // TODO: make bundle for the session and stream
+    pub fn open_bidrectional_stream(
         &self,
-        commands: &'a mut Commands<'a, 'a>,
         id: StreamId,
-    ) -> EntityCommands<'a> {
+    ) -> (QuicBidirectionalStreamAttempt, QuicSession) {
         let conn_task = self
             .runtime
             .spawn(open_bidirectional_task(self.connection.clone()));
 
-        let mut empty = commands.spawn_empty();
-        empty.insert((
+        (
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), id, conn_task),
             QuicSession::new(id),
-        ));
-
-        empty
+        )
     }
 }
 
