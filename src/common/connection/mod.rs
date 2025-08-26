@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use bevy::{
-    ecs::{
-        component::Component,
-        system::{Commands, EntityCommands},
-    },
+    ecs::{bundle::Bundle, component::Component},
     prelude::Deref,
 };
 use s2n_quic::{Connection, connection::Error as ConnectionError, stream::BidirectionalStream};
@@ -26,6 +23,15 @@ pub struct QuicConnection {
     connection: Arc<Mutex<Connection>>,
 }
 
+// TODO: Okay I'm feeling like this approach is wrong.
+// I think this can be done better by instead constructing our stream attempts
+// and passing in the connection during construction which might lend itself
+// better to the ECS design.
+// As opposed to a connection that spawns streams...
+// I dunno, maybe, maybe not. I'm gonna sleep on it.
+#[derive(Bundle)]
+pub struct BidirectionalSessionAttempt(QuicBidirectionalStreamAttempt, QuicSession);
+
 impl QuicConnection {
     pub fn new(runtime: Handle, connection: Connection) -> Self {
         Self {
@@ -34,16 +40,16 @@ impl QuicConnection {
         }
     }
 
-    // TODO: make bundle for the session and stream
-    pub fn open_bidrectional_stream(
-        &self,
-        id: StreamId,
-    ) -> (QuicBidirectionalStreamAttempt, QuicSession) {
+    pub(crate) fn get_connection(&self) -> Arc<Mutex<Connection>> {
+        self.connection.clone()
+    }
+
+    pub(crate) fn open_bidrectional_stream(&self, id: StreamId) -> BidirectionalSessionAttempt {
         let conn_task = self
             .runtime
             .spawn(open_bidirectional_task(self.connection.clone()));
 
-        (
+        BidirectionalSessionAttempt(
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), id, conn_task),
             QuicSession::new(id),
         )
