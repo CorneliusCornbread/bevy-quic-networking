@@ -8,6 +8,9 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 
+// TODO: Figure out how we want to structure endpoints in regards to these attempts
+// atm both streams and connectionss would have endpoints which doesn't make sense.
+// This would also make it look like there's a constant endpoint pending a connection.
 #[derive(Component)]
 #[require(SessionEndpoint)]
 pub struct QuicActionAttempt<T> {

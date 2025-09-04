@@ -7,8 +7,11 @@ use tokio::{runtime::Handle, sync::Mutex};
 use crate::common::{
     attempt::QuicActionAttempt,
     stream::{
-        QuicBidirectionalStreamAttempt, id::StreamIdGenerator, receive::QuicReceiveStream,
-        send::QuicSendStream, session::QuicSession,
+        QuicBidirectionalStreamAttempt,
+        id::{StreamId, StreamIdGenerator},
+        receive::QuicReceiveStream,
+        send::QuicSendStream,
+        session::QuicSession,
     },
 };
 
@@ -54,6 +57,10 @@ impl QuicConnection {
             QuicSession::new(id),
         )
     }
+
+    pub(crate) fn generate_stream_id(&mut self) -> StreamId {
+        self.id_gen.generate_id()
+    }
 }
 
 async fn open_bidirectional_task(
@@ -63,7 +70,7 @@ async fn open_bidirectional_task(
 
     {
         let mut conn = conn.lock().await;
-        bi_stream_res = conn.open_bidirectional_stream().await
+        bi_stream_res = conn.open_bidirectional_stream().await;
     }
 
     let bi_stream = bi_stream_res?;
