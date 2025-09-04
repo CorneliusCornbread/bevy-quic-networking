@@ -6,27 +6,40 @@ use s2n_quic::{
 };
 use tokio::runtime::Handle;
 
-use crate::common::connection::QuicConnectionAttempt;
+use crate::common::connection::{
+    QuicConnectionAttempt,
+    id::{ConnectionId, ConnectionIdGenerator},
+};
 
 #[derive(Component)]
 pub struct QuicClient {
     runtime: Handle,
-    client: s2n_quic::Client,
+    client: Client,
+    id_gen: ConnectionIdGenerator,
 }
 
 impl QuicClient {
     pub fn new(runtime: Handle, client: Client) -> Self {
-        QuicClient { runtime, client }
+        QuicClient {
+            runtime,
+            client,
+            id_gen: Default::default(),
+        }
     }
 
-    pub fn connect(&mut self, connect: Connect) -> QuicConnectionAttempt {
+    pub(crate) fn open_connection(
+        &mut self,
+        connect: Connect,
+    ) -> (QuicConnectionAttempt, ConnectionId) {
         let client = &self.client;
         let attempt = client.connect(connect);
 
         let conn_task = self.runtime.spawn(create_connection(attempt));
 
-        // TODO: probably refactor the stream_id such that we have some client or server id
-        QuicConnectionAttempt::new(self.runtime.clone(), 0.into(), conn_task)
+        (
+            QuicConnectionAttempt::new(self.runtime.clone(), conn_task),
+            self.id_gen.generate_id(),
+        )
     }
 }
 

@@ -1,42 +1,40 @@
 use std::sync::Arc;
 
-use bevy::{
-    ecs::{bundle::Bundle, component::Component},
-    prelude::Deref,
-};
+use bevy::ecs::{bundle::Bundle, component::Component};
 use s2n_quic::{Connection, connection::Error as ConnectionError, stream::BidirectionalStream};
 use tokio::{runtime::Handle, sync::Mutex};
 
 use crate::common::{
     attempt::QuicActionAttempt,
     stream::{
-        QuicBidirectionalStreamAttempt, StreamId, receive::QuicReceiveStream, send::QuicSendStream,
-        session::QuicSession,
+        QuicBidirectionalStreamAttempt, id::StreamIdGenerator, receive::QuicReceiveStream,
+        send::QuicSendStream, session::QuicSession,
     },
 };
 
-pub type QuicConnectionAttempt = QuicActionAttempt<Connection, ConnectionId>;
+pub mod id;
+pub mod request;
+
+pub type QuicConnectionAttempt = QuicActionAttempt<Connection>;
 
 #[derive(Component)]
 pub struct QuicConnection {
     runtime: Handle,
     connection: Arc<Mutex<Connection>>,
+    id_gen: StreamIdGenerator,
 }
 
-// TODO: Okay I'm feeling like this approach is wrong.
-// I think this can be done better by instead constructing our stream attempts
-// and passing in the connection during construction which might lend itself
-// better to the ECS design.
-// As opposed to a connection that spawns streams...
-// I dunno, maybe, maybe not. I'm gonna sleep on it.
 #[derive(Bundle)]
 pub struct BidirectionalSessionAttempt(QuicBidirectionalStreamAttempt, QuicSession);
 
+// TODO: implement entity command extension for spawning streams
+// like what was done for connections
 impl QuicConnection {
     pub fn new(runtime: Handle, connection: Connection) -> Self {
         Self {
             runtime,
             connection: Arc::new(Mutex::new(connection)),
+            id_gen: Default::default(),
         }
     }
 
@@ -44,13 +42,15 @@ impl QuicConnection {
         self.connection.clone()
     }
 
-    pub(crate) fn open_bidrectional_stream(&self, id: StreamId) -> BidirectionalSessionAttempt {
+    pub(crate) fn open_bidrectional_stream(&mut self) -> BidirectionalSessionAttempt {
         let conn_task = self
             .runtime
             .spawn(open_bidirectional_task(self.connection.clone()));
 
+        let id = self.id_gen.generate_id();
+
         BidirectionalSessionAttempt(
-            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), id, conn_task),
+            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), conn_task),
             QuicSession::new(id),
         )
     }
@@ -73,13 +73,4 @@ async fn open_bidirectional_task(
     let rec_stream = QuicReceiveStream::new(Handle::current(), rec);
 
     Ok((rec_stream, send_stream))
-}
-
-#[derive(Deref, Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct ConnectionId(u64);
-
-impl From<u64> for ConnectionId {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
 }

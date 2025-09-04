@@ -10,21 +10,19 @@ use tokio::{
 
 #[derive(Component)]
 #[require(SessionEndpoint)]
-pub struct QuicActionAttempt<T, T2> {
+pub struct QuicActionAttempt<T> {
     runtime: Handle,
     conn_task: Option<JoinHandle<Result<T, ConnectionError>>>,
     /// In the event that we have a failure with tokio, we store the error data here
     last_error: Option<QuicActionError>,
-    id: T2,
 }
 
-impl<T, T2> QuicActionAttempt<T, T2> {
-    pub fn new(handle: Handle, id: T2, conn_task: JoinHandle<Result<T, ConnectionError>>) -> Self {
+impl<T> QuicActionAttempt<T> {
+    pub fn new(handle: Handle, conn_task: JoinHandle<Result<T, ConnectionError>>) -> Self {
         Self {
             runtime: handle,
             conn_task: Some(conn_task),
             last_error: None,
-            id,
         }
     }
 
