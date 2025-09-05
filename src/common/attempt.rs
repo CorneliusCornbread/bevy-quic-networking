@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use aeronet::io::SessionEndpoint;
-use bevy::ecs::component::Component;
 use s2n_quic::connection::Error as ConnectionError;
 use tokio::{
     runtime::Handle,
@@ -11,8 +9,6 @@ use tokio::{
 // TODO: Figure out how we want to structure endpoints in regards to these attempts
 // atm both streams and connectionss would have endpoints which doesn't make sense.
 // This would also make it look like there's a constant endpoint pending a connection.
-#[derive(Component)]
-#[require(SessionEndpoint)]
 pub struct QuicActionAttempt<T> {
     runtime: Handle,
     conn_task: Option<JoinHandle<Result<T, ConnectionError>>>,
@@ -21,7 +17,7 @@ pub struct QuicActionAttempt<T> {
 }
 
 impl<T> QuicActionAttempt<T> {
-    pub fn new(handle: Handle, conn_task: JoinHandle<Result<T, ConnectionError>>) -> Self {
+    pub(crate) fn new(handle: Handle, conn_task: JoinHandle<Result<T, ConnectionError>>) -> Self {
         Self {
             runtime: handle,
             conn_task: Some(conn_task),

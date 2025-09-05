@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
-use bevy::ecs::{bundle::Bundle, component::Component};
+use bevy::{
+    ecs::{bundle::Bundle, component::Component},
+    prelude::{Deref, DerefMut},
+};
 use s2n_quic::{Connection, connection::Error as ConnectionError, stream::BidirectionalStream};
-use tokio::{runtime::Handle, sync::Mutex};
+use tokio::{runtime::Handle, sync::Mutex, task::JoinHandle};
 
 use crate::common::{
     attempt::QuicActionAttempt,
@@ -18,9 +21,16 @@ use crate::common::{
 pub mod id;
 pub mod request;
 
-pub type QuicConnectionAttempt = QuicActionAttempt<Connection>;
+#[derive(Deref, DerefMut, Component)]
+pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
 
-#[derive(Component)]
+impl QuicConnectionAttempt {
+    pub fn new(handle: Handle, conn_task: JoinHandle<Result<Connection, ConnectionError>>) -> Self {
+        Self(QuicActionAttempt::new(handle, conn_task))
+    }
+}
+
+#[derive(Debug, Component)]
 pub struct QuicConnection {
     runtime: Handle,
     connection: Arc<Mutex<Connection>>,

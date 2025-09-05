@@ -3,7 +3,6 @@ use bevy::ecs::component::Component;
 use s2n_quic::{Connection, Server};
 use std::{
     error::Error,
-    net::SocketAddr,
     sync::{Arc, atomic::AtomicBool},
 };
 use tokio::{

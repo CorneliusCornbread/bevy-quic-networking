@@ -2,7 +2,7 @@ use bevy::ecs::component::Component;
 
 use crate::common::IdGenerator;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct StreamIdGenerator {
     generator: IdGenerator,
 }

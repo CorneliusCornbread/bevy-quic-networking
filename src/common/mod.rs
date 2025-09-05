@@ -34,7 +34,7 @@ impl<T> HandleChannelError for Result<(), TrySendError<T>> {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct IdGenerator {
     current: AtomicU64,
 }

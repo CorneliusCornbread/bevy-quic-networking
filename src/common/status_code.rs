@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use s2n_quic::application::Error;
 
 /// A simple enum which uses HTTP status codes

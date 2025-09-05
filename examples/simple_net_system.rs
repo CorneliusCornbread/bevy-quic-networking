@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 use bevy::{
     DefaultPlugins,
     app::App,
@@ -10,10 +8,7 @@ use bevy::{
         settings::{PowerPreference, WgpuSettings},
     },
 };
-use bevy_quic_networking::client::QuicClient;
 use bevy_transport::{NetworkUpdate, TransportPlugin};
-use s2n_quic::{Client, client::Connect};
-use tokio::runtime::Handle;
 
 fn main() {
     let _app = App::new()

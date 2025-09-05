@@ -1,7 +1,4 @@
-use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    usize,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const STOPPED: i8 = 0;
 const STOPPING: i8 = 1;
@@ -29,8 +26,20 @@ impl AtomicPollFlag {
             .expect("Poll flag is in invalid state. Has memory corruption occured?")
     }
 
-    pub fn fetch_update(&mut self, val: PollState, order: Ordering) -> PollState {
-        todo!()
+    pub fn store(&self, val: usize, order: Ordering) {
+        self.state.store(val, order);
+    }
+
+    pub fn fetch_update<F>(
+        &self,
+        set_order: Ordering,
+        fetch_order: Ordering,
+        f: F,
+    ) -> Result<usize, usize>
+    where
+        F: FnMut(usize) -> Option<usize>,
+    {
+        self.state.fetch_update(set_order, fetch_order, f)
     }
 }
 
@@ -49,6 +58,12 @@ impl TryFrom<usize> for PollState {
 
 #[derive(Debug, Clone)]
 pub struct RangeError(usize);
+
+impl RangeError {
+    pub fn get_incorrect_value(&self) -> usize {
+        self.0
+    }
+}
 
 pub enum PollState {
     Stopped = STOPPED as isize,
