@@ -1,68 +1,90 @@
-use std::sync::Arc;
+use std::{
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
-use bevy::ecs::component::Component;
+use bevy::{ecs::component::Component, log::info};
 use s2n_quic::{
     Connection, Server, client::ConnectionAttempt, connection::Error as ConnectionError,
 };
 use tokio::{
     runtime::Handle,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        mpsc::{self, Receiver, Sender},
+    },
     task::{JoinError, JoinHandle},
 };
 
-use crate::common::connection::{QuicConnection, id::ConnectionIdGenerator};
+use crate::{
+    common::connection::{
+        QuicConnection,
+        id::{ConnectionId, ConnectionIdGenerator},
+    },
+    server::flag::{AtomicPollFlag, PollState},
+};
 
 pub mod endpoint;
-//pub mod flag;
+pub mod flag;
+
+const MAX_PENDING_CONNECTIONS: usize = 100;
+const POLL_SLEEP_DUR: Duration = Duration::from_millis(50);
 
 #[derive(Component)]
 pub struct QuicServer {
     runtime: Handle,
     server: Arc<Mutex<Server>>,
     id_gen: ConnectionIdGenerator,
-    poll_job: Option<JoinHandle<Option<Connection>>>,
+    poll_flag: Arc<AtomicPollFlag>,
+    poll_job: JoinHandle<()>,
+    poll_rec: Receiver<Connection>,
 }
 
 impl QuicServer {
     pub fn new(runtime: Handle, server: Server) -> Self {
+        let server_mutex = Arc::new(Mutex::new(server));
+        let poll_flag: Arc<AtomicPollFlag> = Default::default();
+        let (send, rec) = mpsc::channel(MAX_PENDING_CONNECTIONS);
+        let job = runtime.spawn(poll_connection(
+            server_mutex.clone(),
+            send,
+            poll_flag.clone(),
+        ));
+
         Self {
             runtime,
-            server: Arc::new(Mutex::new(server)),
+            server: server_mutex,
             id_gen: Default::default(),
-            poll_job: None,
+            poll_flag,
+            poll_job: job,
+            poll_rec: rec,
         }
     }
 
     pub fn poll_connection(&mut self) -> Result<ConnectionPoll, JoinError> {
-        if self.poll_job.is_none() {
-            let poll = self.runtime.spawn(poll_connection(self.server.clone()));
-            self.poll_job = Some(poll);
-            return Ok(ConnectionPoll::None);
+        if !self.poll_job.is_finished() {
+            return Ok(ConnectionPoll::ServerClosed);
         }
 
-        let job = self.poll_job.as_mut().unwrap();
-
-        if !job.is_finished() {
-            return Ok(ConnectionPoll::None);
-        }
-
-        let conn_opt = self.runtime.block_on(job)?;
-
-        if let Some(conn) = conn_opt {
-            return Ok(ConnectionPoll::NewConnection(QuicConnection::new(
-                self.runtime.clone(),
-                conn,
-            )));
+        if let Some(conn) = self.poll_rec.blocking_recv() {
+            return Ok(ConnectionPoll::NewConnection(
+                QuicConnection::new(self.runtime.clone(), conn),
+                self.id_gen.generate_id(),
+            ));
         }
 
         Ok(ConnectionPoll::ServerClosed)
     }
 
-    /// Starts a connection poll if one is not already running.
-    /// Returns Some(()) if no poll was running and one was successfully started.
-    /// Returns None if there's already a running poll.
-    pub fn start_connection_poll(&mut self) -> Option<()> {
-        todo!()
+    pub fn is_polling(&self) -> bool {
+        match self.poll_flag.load(Ordering::Acquire) {
+            PollState::Stopped => false,
+            PollState::Polling => true,
+        }
+    }
+
+    pub fn set_polling(&mut self, polling: PollState) {
+        self.poll_flag.store(polling, Ordering::Relaxed);
     }
 }
 
@@ -70,14 +92,35 @@ impl QuicServer {
 pub enum ConnectionPoll {
     None,
     ServerClosed,
-    NewConnection(QuicConnection),
+    NewConnection(QuicConnection, ConnectionId),
 }
 
 async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, ConnectionError> {
     attempt.await
 }
 
-async fn poll_connection(server: Arc<Mutex<Server>>) -> Option<Connection> {
-    let mut lock = server.lock().await;
-    lock.accept().await
+async fn poll_connection(
+    server: Arc<Mutex<Server>>,
+    sender: Sender<Connection>,
+    flag: Arc<AtomicPollFlag>,
+) {
+    loop {
+        let poll = flag.load(Ordering::Acquire);
+
+        if poll != PollState::Polling {
+            tokio::time::sleep(POLL_SLEEP_DUR).await;
+            continue;
+        }
+
+        let mut lock = server.lock().await;
+        let conn_opt = lock.accept().await;
+        drop(lock);
+
+        if let Some(conn) = conn_opt {
+            sender.send(conn);
+        } else {
+            info!("Server connection poll returned none, shutting poll task down");
+            break;
+        }
+    }
 }
