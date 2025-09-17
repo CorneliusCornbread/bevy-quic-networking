@@ -3,7 +3,10 @@ use std::{
     time::Duration,
 };
 
-use bevy::{ecs::component::Component, log::info};
+use bevy::{
+    ecs::component::Component,
+    log::{error, error_once, info, warn},
+};
 use s2n_quic::{
     Connection, Server, client::ConnectionAttempt, connection::Error as ConnectionError,
 };
@@ -17,9 +20,12 @@ use tokio::{
 };
 
 use crate::{
-    common::connection::{
-        QuicConnection,
-        id::{ConnectionId, ConnectionIdGenerator},
+    common::{
+        connection::{
+            QuicConnection,
+            id::{ConnectionId, ConnectionIdGenerator},
+        },
+        status_code::StatusCode,
     },
     server::flag::{AtomicPollFlag, PollState},
 };
@@ -45,7 +51,7 @@ impl QuicServer {
         let server_mutex = Arc::new(Mutex::new(server));
         let poll_flag: Arc<AtomicPollFlag> = Default::default();
         let (send, rec) = mpsc::channel(MAX_PENDING_CONNECTIONS);
-        let job = runtime.spawn(poll_connection(
+        let job = runtime.spawn(accept_connection(
             server_mutex.clone(),
             send,
             poll_flag.clone(),
@@ -95,11 +101,7 @@ pub enum ConnectionPoll {
     NewConnection(QuicConnection, ConnectionId),
 }
 
-async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, ConnectionError> {
-    attempt.await
-}
-
-async fn poll_connection(
+async fn accept_connection(
     server: Arc<Mutex<Server>>,
     sender: Sender<Connection>,
     flag: Arc<AtomicPollFlag>,
@@ -117,7 +119,17 @@ async fn poll_connection(
         drop(lock);
 
         if let Some(conn) = conn_opt {
-            sender.send(conn);
+            let res = sender.send(conn).await;
+
+            if let Err(e) = res {
+                warn!(
+                    "Unable to send a received connection. What happened to our receivers? Quitting poll task."
+                );
+
+                e.0.close(StatusCode::ServiceUnavailable.into());
+
+                break;
+            }
         } else {
             info!("Server connection poll returned none, shutting poll task down");
             break;

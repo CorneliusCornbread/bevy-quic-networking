@@ -8,6 +8,7 @@ pub trait ConnectionRequestExt {
     -> &mut Self;
 }
 
+// TODO: streams should be sessions, not connections
 impl<'a> ConnectionRequestExt for EntityCommands<'a> {
     fn request_client_connection(
         &mut self,
@@ -19,25 +20,5 @@ impl<'a> ConnectionRequestExt for EntityCommands<'a> {
 
         self.commands().spawn(bundle);
         self
-    }
-}
-
-pub trait StreamRequestExt {
-    fn request_bidirectional_stream(&mut self, connection: &mut QuicConnection) -> &mut Self;
-    fn request_receive_stream(&mut self, connection: &mut QuicConnection) -> &mut Self;
-}
-
-// TODO: streams should be sessions, not connections
-impl<'a> StreamRequestExt for EntityCommands<'a> {
-    fn request_bidirectional_stream(&mut self, connection: &mut QuicConnection) -> &mut Self {
-        let stream_attempt = connection.open_bidrectional_stream();
-        let bundle = (stream_attempt, ChildOf(self.id()));
-
-        self.commands().spawn(bundle);
-        self
-    }
-
-    fn request_receive_stream(&mut self, connection: &mut QuicConnection) -> &mut Self {
-        todo!()
     }
 }

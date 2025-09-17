@@ -38,10 +38,11 @@ pub struct QuicConnection {
 }
 
 #[derive(Bundle)]
-pub struct BidirectionalSessionAttempt(QuicBidirectionalStreamAttempt, QuicSession);
+pub struct BidirectionalSessionAttempt(
+    pub(crate) QuicBidirectionalStreamAttempt,
+    pub(crate) QuicSession,
+);
 
-// TODO: implement entity command extension for spawning streams
-// like what was done for connections
 impl QuicConnection {
     pub fn new(runtime: Handle, connection: Connection) -> Self {
         Self {
