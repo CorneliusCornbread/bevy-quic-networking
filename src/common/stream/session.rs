@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use crate::common::StreamId;
 
-const CHANNEL_BUFF_SIZE: usize = 256;
 const MIN_MTU: usize = 1024;
 
 #[derive(Component)]

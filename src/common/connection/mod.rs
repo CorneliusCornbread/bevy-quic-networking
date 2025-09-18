@@ -22,6 +22,7 @@ pub mod id;
 pub mod request;
 
 #[derive(Deref, DerefMut, Component)]
+#[component(storage = "SparseSet")]
 pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
 
 impl QuicConnectionAttempt {

@@ -5,11 +5,9 @@ use std::{
 
 use bevy::{
     ecs::component::Component,
-    log::{error, error_once, info, warn},
+    log::{info, warn},
 };
-use s2n_quic::{
-    Connection, Server, client::ConnectionAttempt, connection::Error as ConnectionError,
-};
+use s2n_quic::{Connection, Server};
 use tokio::{
     runtime::Handle,
     sync::{

@@ -1,9 +1,7 @@
 use bevy::{
-    app::{Plugin, Update},
-    log::info,
+    app::Plugin,
     prelude::{Deref, DerefMut, Resource},
 };
-use bevy_transport::{TransportPlugin, config::NetworkConfig};
 use tokio::runtime::Runtime;
 
 pub mod client;
@@ -18,18 +16,7 @@ pub struct QuicPlugin {
 
 impl Plugin for QuicPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        // NOTE: If bevy plugin dependencies ever get added this may not be necessary
-        // TODO: change this transport plugin and config information to be something to upstream into
-        // Aeronet directly
-        if !app.is_plugin_added::<TransportPlugin>() {
-            app.add_plugins(TransportPlugin::new(true, self.tick_rate));
-        } else {
-            info!(
-                "Transport plugin was already initialized. Make sure the system for NetworkUpdate is handled, either by the default transport or your own."
-            );
-            app.insert_resource(NetworkConfig::new(self.tick_rate));
-            app.init_resource::<TokioRuntime>();
-        }
+        app.init_resource::<TokioRuntime>();
 
         //app.add_systems(Update, drain_messages);
     }
