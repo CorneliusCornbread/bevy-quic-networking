@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::SystemTime};
 
+use bevy::{ecs::component::Component, time::Time};
 use s2n_quic::connection::Error as ConnectionError;
 use tokio::{
     runtime::Handle,
@@ -69,4 +70,24 @@ pub enum QuicActionError {
     Consumed,
     Failed(ConnectionError),
     Crashed(Arc<JoinError>),
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct QuicActionErrorComponent {
+    error: QuicActionError,
+    timestamp: SystemTime,
+}
+
+impl QuicActionErrorComponent {
+    pub fn new(error: QuicActionError, timestamp: SystemTime) -> Self {
+        Self { error, timestamp }
+    }
+
+    pub fn error(&self) -> &QuicActionError {
+        &self.error
+    }
+
+    pub fn timestamp(&self) -> &SystemTime {
+        &self.timestamp
+    }
 }

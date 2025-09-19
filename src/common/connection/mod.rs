@@ -19,7 +19,9 @@ use crate::common::{
 };
 
 pub mod id;
+pub mod plugin;
 pub mod request;
+pub mod runtime;
 
 #[derive(Deref, DerefMut, Component)]
 #[component(storage = "SparseSet")]

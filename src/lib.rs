@@ -1,55 +1,17 @@
-use bevy::{
-    app::Plugin,
-    prelude::{Deref, DerefMut, Resource},
-};
-use tokio::runtime::Runtime;
-
 pub mod client;
 pub mod common;
+pub mod plugin;
 pub mod server;
 
+use bevy::app::{PluginGroup, PluginGroupBuilder};
 pub use s2n_quic::Server;
 
-pub struct QuicPlugin {
-    tick_rate: u16,
-}
+use crate::plugin::QuicAsyncPlugin;
 
-impl Plugin for QuicPlugin {
-    fn build(&self, app: &mut bevy::prelude::App) {
-        app.init_resource::<TokioRuntime>();
+pub struct QuicDefaultPlugins;
 
-        //app.add_systems(Update, drain_messages);
-    }
-}
-
-impl Default for QuicPlugin {
-    fn default() -> Self {
-        Self {
-            tick_rate: bevy_transport::config::DEFAULT_TICK_RATE,
-        }
-    }
-}
-
-impl QuicPlugin {
-    pub fn tick_rate(&self) -> u16 {
-        self.tick_rate
-    }
-
-    pub fn new(tick_rate: u16) -> Self {
-        Self { tick_rate }
-    }
-}
-
-#[derive(Resource, Deref, DerefMut)]
-pub(crate) struct TokioRuntime(pub(crate) Runtime);
-
-impl Default for TokioRuntime {
-    fn default() -> Self {
-        Self(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("Unable to create async runtime."),
-        )
+impl PluginGroup for QuicDefaultPlugins {
+    fn build(self) -> bevy::app::PluginGroupBuilder {
+        PluginGroupBuilder::start::<Self>().add(QuicAsyncPlugin::default())
     }
 }
