@@ -11,6 +11,7 @@ use crate::common::{
 };
 
 pub mod id;
+pub mod plugin;
 pub mod receive;
 pub mod request;
 pub mod send;

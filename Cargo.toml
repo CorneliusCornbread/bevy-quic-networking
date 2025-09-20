@@ -4,9 +4,14 @@ version = "0.16.0"
 edition = "2024"
 
 [dependencies]
-aeronet = "0.14.0"
+aeronet = "0.16.0"
 bevy = "0.16.0"
 bevy_transport = { path = "crates/bevy_transport" }
-s2n-quic = "1.63.0"
-thiserror = "2.0.14"
+s2n-quic = "1.66.0"
+thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["sync", "rt-multi-thread", "macros"] }
+
+[features]
+default = []
+connection-errors = []
+stream-errors = []

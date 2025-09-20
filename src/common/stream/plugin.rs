@@ -3,40 +3,40 @@ use bevy::{
     ecs::{
         entity::Entity,
         hierarchy::ChildOf,
-        system::{Commands, Query, Res},
+        system::{Commands, Query},
     },
     log::error,
 };
 
-use crate::common::connection::{
-    QuicConnection, QuicConnectionAttempt, id::ConnectionId, runtime::TokioRuntime,
-};
+use crate::common::stream::{QuicBidirectionalStreamAttempt, id::StreamId};
 
 #[derive(Debug)]
-pub struct ConnectionAttemptPlugin;
+pub struct StreamAttemptPlugin;
 
-impl Plugin for ConnectionAttemptPlugin {
+impl Plugin for StreamAttemptPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(Update, handle_connection_attempt);
+        app.add_systems(Update, handle_bidir_stream_attempt);
     }
 }
 
-fn handle_connection_attempt(
+fn handle_bidir_stream_attempt(
     mut commands: Commands,
-    runtime: Res<TokioRuntime>,
-    query: Query<(Entity, &mut QuicConnectionAttempt, &ConnectionId, &ChildOf)>,
+    query: Query<(
+        Entity,
+        &mut QuicBidirectionalStreamAttempt,
+        &StreamId,
+        &ChildOf,
+    )>,
 ) {
-    let handle_ref = runtime.handle();
-
     for entity_bundle in query {
         let (entity, mut attempt, id, parent) = entity_bundle;
 
         let res = attempt.get_output();
 
         if let Err(e) = res {
-            error!("Error handling connection attempt: {:?}", e);
+            error!("Error handling stream attempt: {:?}", e);
 
-            #[cfg(feature = "connection-errors")]
+            #[cfg(feature = "stream-errors")]
             {
                 use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
 
@@ -50,10 +50,9 @@ fn handle_connection_attempt(
             continue;
         }
 
-        let conn = res.unwrap();
-        let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
+        let streams = res.unwrap();
 
-        let bundle = (quic_conn, *id, parent.clone());
+        let bundle = (streams, *id, parent.clone());
         commands.entity(entity).despawn();
         commands.spawn(bundle);
     }

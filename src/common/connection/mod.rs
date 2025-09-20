@@ -41,10 +41,7 @@ pub struct QuicConnection {
 }
 
 #[derive(Bundle)]
-pub struct BidirectionalSessionAttempt(
-    pub(crate) QuicBidirectionalStreamAttempt,
-    pub(crate) QuicSession,
-);
+pub struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
 
 impl QuicConnection {
     pub fn new(runtime: Handle, connection: Connection) -> Self {
@@ -68,7 +65,7 @@ impl QuicConnection {
 
         BidirectionalSessionAttempt(
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), conn_task),
-            QuicSession::new(id),
+            self.generate_stream_id(),
         )
     }
 
