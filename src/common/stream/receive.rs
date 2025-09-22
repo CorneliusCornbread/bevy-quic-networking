@@ -45,6 +45,14 @@ impl QuicReceiveStream {
             receive_errors,
         }
     }
+
+    pub fn blocking_recv(&mut self) -> Option<RecvPacket> {
+        self.inbound_data.blocking_recv()
+    }
+
+    pub fn blocking_recv_many(&mut self, buffer: &mut Vec<RecvPacket>, limit: usize) -> usize {
+        self.inbound_data.blocking_recv_many(buffer, limit)
+    }
 }
 
 enum RecControlMessage {

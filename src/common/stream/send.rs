@@ -5,6 +5,7 @@ use bevy::ecs::component::Component;
 use bevy::log::{info, warn};
 use s2n_quic::stream::SendStream;
 use tokio::runtime::Handle;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 
@@ -39,6 +40,49 @@ impl QuicSendStream {
             outbound_control,
             send_errors,
         }
+    }
+
+    /// Returns `Some(())` in the event the close event was successful, if it wasn't
+    /// it's due to the Receiver of the message being dropped. In which case
+    /// it's likely the async task has been shut down, already quit, or crashed.
+    pub fn close(&mut self) -> Option<()> {
+        self.outbound_control
+            .blocking_send(SendControlMessage::CloseAndQuit)
+            .ok()
+    }
+
+    /// Checks if the async task for the stream is still running, in which case
+    /// the stream should still be open, if not the task should finish on its own.
+    pub fn is_open(&self) -> bool {
+        !self.send_task.is_finished()
+    }
+
+    pub fn send(&mut self, data: Bytes) -> Result<(), SendError<Bytes>> {
+        self.outbound_data.blocking_send(data)
+    }
+
+    /// Take a vector of bytes and send bytes until an error is hit
+    /// or until the vector is emptied.
+    pub fn send_many_drain(&mut self, data: &mut Vec<Bytes>) -> Result<(), SendError<Bytes>> {
+        let mut sent_count = 0;
+        let mut res = Ok(());
+
+        for item in data.iter() {
+            res = self.outbound_data.blocking_send(item.clone());
+            if res.is_err() {
+                break;
+            }
+
+            sent_count += 1;
+        }
+
+        if sent_count == data.len() {
+            data.clear();
+        } else {
+            data.drain(..sent_count);
+        }
+
+        res
     }
 }
 

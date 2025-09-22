@@ -22,6 +22,7 @@ use crate::{
         connection::{
             QuicConnection,
             id::{ConnectionId, ConnectionIdGenerator},
+            runtime::TokioRuntime,
         },
         status_code::StatusCode,
     },
@@ -45,7 +46,7 @@ pub struct QuicServer {
 }
 
 impl QuicServer {
-    pub fn new(runtime: Handle, server: Server) -> Self {
+    pub fn new(runtime: &TokioRuntime, server: Server) -> Self {
         let server_mutex = Arc::new(Mutex::new(server));
         let poll_flag: Arc<AtomicPollFlag> = Default::default();
         let (send, rec) = mpsc::channel(MAX_PENDING_CONNECTIONS);
@@ -56,7 +57,7 @@ impl QuicServer {
         ));
 
         Self {
-            runtime,
+            runtime: runtime.0.handle().clone(),
             server: server_mutex,
             id_gen: Default::default(),
             poll_flag,

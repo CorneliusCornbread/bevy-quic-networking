@@ -12,6 +12,13 @@ thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["sync", "rt-multi-thread", "macros"] }
 
 [features]
-default = []
+default = ["performance-warns"]
+
+## Creates error components/entities when connections fail
 connection-errors = []
+
+## Creates error components/entities when streams fail
 stream-errors = []
+
+## Should we warn if buffers are being filled faster than we can drain them?
+performance-warns = []

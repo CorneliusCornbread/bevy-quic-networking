@@ -3,12 +3,14 @@ use s2n_quic::{
     Client, Connection,
     client::{Connect, ConnectionAttempt},
     connection::Error as ConnectionError,
+    provider::StartError,
 };
 use tokio::runtime::Handle;
 
 use crate::common::connection::{
     QuicConnectionAttempt,
     id::{ConnectionId, ConnectionIdGenerator},
+    runtime::TokioRuntime,
 };
 
 #[derive(Component)]
@@ -18,10 +20,18 @@ pub struct QuicClient {
     id_gen: ConnectionIdGenerator,
 }
 
+// TODO: you can't actually use the builder from sync contexts :))))
+// This is going to need to be reworked, as is the server code.
 impl QuicClient {
-    pub fn new(runtime: Handle, client: Client) -> Self {
+    pub fn new(runtime: &TokioRuntime) -> Self {
+        let client_handle = runtime.spawn(build());
+        let client = runtime
+            .block_on(client_handle)
+            .unwrap()
+            .expect("unable to start client");
+
         QuicClient {
-            runtime,
+            runtime: runtime.handle().clone(),
             client,
             id_gen: Default::default(),
         }
@@ -45,4 +55,11 @@ impl QuicClient {
 
 async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, ConnectionError> {
     attempt.await
+}
+
+async fn build() -> Result<Client, StartError> {
+    Client::builder()
+        .with_io("0.0.0.0:0")
+        .expect("Unable to build client")
+        .start()
 }

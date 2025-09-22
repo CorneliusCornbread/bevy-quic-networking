@@ -6,8 +6,14 @@ pub mod server;
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 pub use s2n_quic::Server;
 
+// Re-exports
+pub use s2n_quic::client::Client;
+
 use crate::{
-    common::{connection::plugin::ConnectionAttemptPlugin, stream::plugin::StreamAttemptPlugin},
+    common::{
+        connection::plugin::ConnectionAttemptPlugin,
+        stream::{plugin::StreamAttemptPlugin, session::QuicSessionPacketPlugin},
+    },
     plugin::QuicAsyncPlugin,
 };
 
@@ -19,5 +25,6 @@ impl PluginGroup for QuicDefaultPlugins {
             .add(QuicAsyncPlugin::default())
             .add(ConnectionAttemptPlugin)
             .add(StreamAttemptPlugin)
+            .add(QuicSessionPacketPlugin)
     }
 }

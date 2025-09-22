@@ -1,14 +1,18 @@
 use bevy::{
     DefaultPlugins,
-    app::App,
-    log::info,
+    app::{App, Startup},
+    ecs::system::{Commands, Res},
     prelude::PluginGroup,
     render::{
         RenderPlugin,
         settings::{PowerPreference, WgpuSettings},
     },
 };
-use bevy_transport::{NetworkUpdate, TransportPlugin};
+use bevy_quic_networking::{
+    QuicDefaultPlugins, client::QuicClient, common::connection::runtime::TokioRuntime,
+    server::QuicServer,
+};
+use s2n_quic::{Client, Server, client::Builder};
 
 fn main() {
     let _app = App::new()
@@ -25,12 +29,25 @@ fn main() {
                 ..Default::default()
             }),
         )
-        // Default will run 32 times per second with a simple transport system, for example's sake, we're updating once per second.
-        .add_plugins(TransportPlugin::new(false, 1))
-        .add_systems(NetworkUpdate, transport_update)
+        .add_plugins(QuicDefaultPlugins)
+        .add_systems(Startup, setup)
         .run();
 }
 
-fn transport_update() {
-    info!("Transport update");
+const IP: &str = "127.0.0.1:7777";
+
+fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
+    let client_comp = QuicClient::new(&runtime);
+
+    commands.spawn(client_comp);
+
+    /*
+    let server = Server::builder()
+        .with_io(IP)
+        .expect("Unable to build server");
+
+        */
+    //let server_comp = QuicServer::new(&runtime, server);
+
+    //commands.spawn(server_comp);
 }
