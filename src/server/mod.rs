@@ -1,10 +1,12 @@
 use std::{
+    error::Error,
+    net::{IpAddr, SocketAddr},
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
 
 use bevy::{
-    ecs::component::Component,
+    ecs::{component::Component, system::Res},
     log::{info, warn},
 };
 use s2n_quic::{Connection, Server};
@@ -45,8 +47,13 @@ pub struct QuicServer {
     poll_rec: Receiver<Connection>,
 }
 
+// TODO: make a function to allow the user to provide their own function to build a server,
+// for example providing your own TLS certs.
 impl QuicServer {
-    pub fn new(runtime: &TokioRuntime, server: Server) -> Self {
+    pub fn bind(runtime: &TokioRuntime, bind_ip: SocketAddr) -> Result<Self, Box<dyn Error>> {
+        let handle = runtime.handle().clone();
+        let server = runtime.block_on(build_server(bind_ip))?;
+
         let server_mutex = Arc::new(Mutex::new(server));
         let poll_flag: Arc<AtomicPollFlag> = Default::default();
         let (send, rec) = mpsc::channel(MAX_PENDING_CONNECTIONS);
@@ -56,14 +63,14 @@ impl QuicServer {
             poll_flag.clone(),
         ));
 
-        Self {
-            runtime: runtime.0.handle().clone(),
+        Ok(Self {
+            runtime: handle,
             server: server_mutex,
             id_gen: Default::default(),
             poll_flag,
             poll_job: job,
             poll_rec: rec,
-        }
+        })
     }
 
     pub fn poll_connection(&mut self) -> Result<ConnectionPoll, JoinError> {
@@ -134,4 +141,9 @@ async fn accept_connection(
             break;
         }
     }
+}
+
+async fn build_server(ip: SocketAddr) -> Result<Server, Box<dyn Error>> {
+    let server = Server::builder().with_io(ip)?.start()?;
+    Ok(server)
 }

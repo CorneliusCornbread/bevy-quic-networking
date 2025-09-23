@@ -25,10 +25,7 @@ pub struct QuicClient {
 impl QuicClient {
     pub fn new(runtime: &TokioRuntime) -> Self {
         let client_handle = runtime.spawn(build());
-        let client = runtime
-            .block_on(client_handle)
-            .unwrap()
-            .expect("unable to start client");
+        let client = runtime.block_on(client_handle).unwrap();
 
         QuicClient {
             runtime: runtime.handle().clone(),
@@ -57,9 +54,10 @@ async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, Con
     attempt.await
 }
 
-async fn build() -> Result<Client, StartError> {
+async fn build() -> Client {
     Client::builder()
         .with_io("0.0.0.0:0")
-        .expect("Unable to build client")
+        .expect("Unable to build client... are we... out of sockets??")
         .start()
+        .expect("Unable to start client")
 }

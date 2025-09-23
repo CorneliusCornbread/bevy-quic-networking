@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use bevy::{
     DefaultPlugins,
     app::{App, Startup},
@@ -41,13 +43,9 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
 
     commands.spawn(client_comp);
 
-    /*
-    let server = Server::builder()
-        .with_io(IP)
-        .expect("Unable to build server");
+    let ip: SocketAddr = IP.parse().unwrap();
 
-        */
-    //let server_comp = QuicServer::new(&runtime, server);
+    let server_comp = QuicServer::bind(&runtime, ip).expect("Unable to bind to server address");
 
-    //commands.spawn(server_comp);
+    commands.spawn(server_comp);
 }
