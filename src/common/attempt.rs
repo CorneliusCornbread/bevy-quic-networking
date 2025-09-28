@@ -31,7 +31,7 @@ impl<T> QuicActionAttempt<T> {
             return Err(e.clone());
         }
 
-        let join_handle_res = self.conn_task.take();
+        let join_handle_res = self.conn_task.as_mut();
 
         if join_handle_res.is_none() {
             return Err(QuicActionError::Consumed);
@@ -59,6 +59,8 @@ impl<T> QuicActionAttempt<T> {
             self.last_error = Some(creation_err.clone());
             return Err(creation_err);
         }
+
+        bevy::log::info!("Returning connection");
 
         Ok(res.unwrap())
     }

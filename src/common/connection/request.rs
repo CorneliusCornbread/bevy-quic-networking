@@ -18,6 +18,7 @@ impl<'a> ConnectionRequestExt for EntityCommands<'a> {
         let conn_bundle = client.open_connection(connect);
         let bundle = (conn_bundle.0, conn_bundle.1, ChildOf(self.id()));
 
+        bevy::log::info!("spawning entity");
         self.commands().spawn(bundle);
         self
     }

@@ -8,8 +8,9 @@ use bevy::{
     log::error,
 };
 
-use crate::common::connection::{
-    QuicConnection, QuicConnectionAttempt, id::ConnectionId, runtime::TokioRuntime,
+use crate::common::{
+    attempt::QuicActionError,
+    connection::{QuicConnection, QuicConnectionAttempt, id::ConnectionId, runtime::TokioRuntime},
 };
 
 #[derive(Debug)]
@@ -34,7 +35,24 @@ fn handle_connection_attempt(
         let res = attempt.get_output();
 
         if let Err(e) = res {
-            error!("Error handling connection attempt: {:?}", e);
+            match e {
+                QuicActionError::InProgress => {
+                    bevy::log::info_once!("In progress");
+
+                    continue;
+                } // TODO: Setup a timeout
+                QuicActionError::Consumed => {
+                    bevy::log::info_once!("Consumed");
+
+                    continue; // Ignore dead components that 
+                }
+                QuicActionError::Failed(error) => {
+                    bevy::log::error!("Error handling connection attempt: {:?}", error)
+                }
+                QuicActionError::Crashed(ref join_error) => {
+                    bevy::log::error!("Error handling connection attempt: {:?}", join_error)
+                }
+            }
 
             #[cfg(feature = "connection-errors")]
             {
@@ -45,11 +63,14 @@ fn handle_connection_attempt(
 
                 commands.spawn(err_bundle);
             }
+
+            bevy::log::info!("despawning attempt entity");
             commands.entity(entity).despawn();
 
             continue;
         }
 
+        bevy::log::info!("Spawning connection entity");
         let conn = res.unwrap();
         let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
 

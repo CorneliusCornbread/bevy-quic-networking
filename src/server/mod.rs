@@ -1,5 +1,6 @@
 use std::{
     error::Error,
+    fmt::Display,
     net::{IpAddr, SocketAddr},
     sync::{Arc, atomic::Ordering},
     time::Duration,
@@ -43,7 +44,7 @@ pub struct QuicServer {
     server: Arc<Mutex<Server>>,
     id_gen: ConnectionIdGenerator,
     poll_flag: Arc<AtomicPollFlag>,
-    poll_job: JoinHandle<()>,
+    poll_job: Option<JoinHandle<Result<(), QuitReason>>>,
     poll_rec: Receiver<Connection>,
 }
 
@@ -55,7 +56,7 @@ impl QuicServer {
         let server = runtime.block_on(build_server(bind_ip))?;
 
         let server_mutex = Arc::new(Mutex::new(server));
-        let poll_flag: Arc<AtomicPollFlag> = Default::default();
+        let poll_flag: Arc<AtomicPollFlag> = Arc::new(AtomicPollFlag::new(PollState::Polling));
         let (send, rec) = mpsc::channel(MAX_PENDING_CONNECTIONS);
         let job = runtime.spawn(accept_connection(
             server_mutex.clone(),
@@ -68,13 +69,15 @@ impl QuicServer {
             server: server_mutex,
             id_gen: Default::default(),
             poll_flag,
-            poll_job: job,
+            poll_job: Some(job),
             poll_rec: rec,
         })
     }
 
     pub fn poll_connection(&mut self) -> Result<ConnectionPoll, JoinError> {
-        if !self.poll_job.is_finished() {
+        if let Some(poll) = self.poll_job.take()
+            && poll.is_finished()
+        {
             return Ok(ConnectionPoll::ServerClosed);
         }
 
@@ -85,7 +88,7 @@ impl QuicServer {
             ));
         }
 
-        Ok(ConnectionPoll::ServerClosed)
+        Ok(ConnectionPoll::None)
     }
 
     pub fn is_polling(&self) -> bool {
@@ -107,12 +110,15 @@ pub enum ConnectionPoll {
     NewConnection(QuicConnection, ConnectionId),
 }
 
+// Rewrite shit using task pool https://docs.rs/bevy/latest/bevy/tasks/struct.TaskPool.html
+// https://github.com/bevyengine/bevy/blob/main/examples/async_tasks/async_compute.rs
 async fn accept_connection(
     server: Arc<Mutex<Server>>,
     sender: Sender<Connection>,
     flag: Arc<AtomicPollFlag>,
-) {
+) -> Result<(), QuitReason> {
     loop {
+        bevy::log::info!("connection accept");
         let poll = flag.load(Ordering::Acquire);
 
         if poll != PollState::Polling {
@@ -128,22 +134,29 @@ async fn accept_connection(
             let res = sender.send(conn).await;
 
             if let Err(e) = res {
-                warn!(
+                bevy::log::warn!(
                     "Unable to send a received connection. What happened to our receivers? Quitting poll task."
                 );
 
                 e.0.close(StatusCode::ServiceUnavailable.into());
 
-                break;
+                return Err(QuitReason::BrokenSender);
             }
         } else {
-            info!("Server connection poll returned none, shutting poll task down");
-            break;
+            bevy::log::info!("Server connection poll returned none, shutting poll task down");
+            return Err(QuitReason::ServerClosed);
         }
     }
 }
 
 async fn build_server(ip: SocketAddr) -> Result<Server, Box<dyn Error>> {
+    bevy::log::info!("test");
+
     let server = Server::builder().with_io(ip)?.start()?;
     Ok(server)
+}
+
+pub enum QuitReason {
+    ServerClosed,
+    BrokenSender,
 }
