@@ -44,13 +44,13 @@ fn handle_connection_attempt(
                 QuicActionError::Consumed => {
                     bevy::log::info_once!("Consumed");
 
-                    continue; // Ignore dead components that 
+                    continue; // Ignore dead components that are already consumed
                 }
                 QuicActionError::Failed(error) => {
                     bevy::log::error!("Error handling connection attempt: {:?}", error)
                 }
                 QuicActionError::Crashed(ref join_error) => {
-                    bevy::log::error!("Error handling connection attempt: {:?}", join_error)
+                    bevy::log::error!("Error joining connection attempt: {:?}", join_error)
                 }
             }
 

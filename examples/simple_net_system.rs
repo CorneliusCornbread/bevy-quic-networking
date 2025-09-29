@@ -57,37 +57,41 @@ fn main() {
 const IP: &str = "127.0.0.1:7777";
 
 fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
+    let ip: SocketAddr = IP.parse().unwrap();
+    info!("IP set to: {}", ip);
+    let server_comp = QuicServer::bind(&runtime, ip).expect("Unable to bind to server address");
+
+    commands.spawn(server_comp);
     let mut client_comp = QuicClient::new(&runtime);
+
+    let conn = client_comp.test_connection(Connect::new(ip));
+
+    conn.unwrap();
 
     commands
         .spawn_empty()
         .request_client_connection(
             &mut client_comp,
-            Connect::new(IP.parse::<SocketAddr>().unwrap()).with_server_name("localhost"),
+            Connect::new(ip).with_server_name("localhost"),
         )
         .insert(client_comp);
-
-    let ip: SocketAddr = IP.parse().unwrap();
-    let server_comp = QuicServer::bind(&runtime, ip).expect("Unable to bind to server address");
-
-    commands.spawn(server_comp);
 }
 
 fn find_clients_without_connections(
     clients: Query<(Entity, &Children), With<QuicClient>>,
-    connections: Query<(), With<QuicConnection>>,
+    connections: Query<(), Without<QuicConnectionAttempt>>,
 ) {
     for (client, children) in &clients {
-        let mut has_connection = false;
+        let mut no_connection = false;
         for &child in children.iter() {
             if connections.get(child).is_ok() {
-                has_connection = true;
+                no_connection = true;
                 break;
             }
         }
 
-        if !has_connection {
-            //info!("Client {client:?} has no connections");
+        if no_connection {
+            info!("Client {client:?} has no connections");
         }
     }
 }
@@ -104,7 +108,7 @@ fn debug_server(servers: Query<&mut QuicServer>) {
         let conn = res.unwrap();
 
         match conn {
-            bevy_quic_networking::server::ConnectionPoll::None => continue,
+            bevy_quic_networking::server::ConnectionPoll::None => info_once!("No new connections"),
             bevy_quic_networking::server::ConnectionPoll::ServerClosed => {
                 info_once!("server closed")
             }
