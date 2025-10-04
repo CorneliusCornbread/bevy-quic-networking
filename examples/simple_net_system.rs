@@ -1,7 +1,4 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::Path,
-};
+use std::{net::SocketAddr, path::Path};
 
 use bevy::{
     DefaultPlugins,
@@ -23,15 +20,13 @@ use bevy::{
 use bevy_quic_networking::{
     QuicDefaultPlugins,
     client::QuicClient,
-    common::connection::{
-        QuicConnection, QuicConnectionAttempt, request::ConnectionRequestExt, runtime::TokioRuntime,
+    common::{
+        connection::{QuicConnection, request::ConnectionRequestExt, runtime::TokioRuntime},
+        stream::request::StreamRequestExt,
     },
     server::QuicServer,
 };
-use s2n_quic::{
-    Client, Server,
-    client::{Builder, Connect},
-};
+use s2n_quic::client::Connect;
 
 fn main() {
     let _app = App::new()
@@ -53,6 +48,7 @@ fn main() {
         .add_plugins(RemoteHttpPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(PostUpdate, debug_server)
+        //        .add_systems(PostUpdate, open_stream_client)
         .run();
 }
 
@@ -83,21 +79,24 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
         .insert(client_comp);
 }
 
-fn find_clients_without_connections(
-    clients: Query<(Entity, &Children), With<QuicClient>>,
-    connections: Query<(), Without<QuicConnectionAttempt>>,
+fn open_stream_client(
+    mut commands: Commands,
+    quic_clients: Query<(Entity, &QuicClient, &Children)>,
+    mut quic_connections: Query<(Entity, &mut QuicConnection), Without<Children>>,
 ) {
-    for (client, children) in &clients {
-        let mut no_connection = false;
+    for (client_entity, client, children) in quic_clients.iter() {
+        // Get all children that have QuicConnection but no Children component
         for &child in children.iter() {
-            if connections.get(child).is_ok() {
-                no_connection = true;
-                break;
-            }
-        }
+            if let Ok((child_entity, mut connection)) = quic_connections.get_mut(child) {
+                info!(
+                    "QuicClient {:?} has no streams for connection {:?}",
+                    client_entity, child_entity
+                );
 
-        if no_connection {
-            info!("Client {client:?} has no connections");
+                commands
+                    .spawn_empty()
+                    .request_bidirectional_stream(&mut connection);
+            }
         }
     }
 }
@@ -114,14 +113,15 @@ fn debug_server(servers: Query<&mut QuicServer>) {
         let conn = res.unwrap();
 
         match conn {
-            bevy_quic_networking::server::ConnectionPoll::None => info_once!("No new connections"),
+            bevy_quic_networking::server::ConnectionPoll::None => (),
             bevy_quic_networking::server::ConnectionPoll::ServerClosed => {
                 info_once!("server closed")
             }
+            // TODO: add connection handling for server to spawn connection component
             bevy_quic_networking::server::ConnectionPoll::NewConnection(
                 quic_connection,
                 connection_id,
-            ) => info!("new connection"),
+            ) => info!("server new connection"),
         }
     }
 }
