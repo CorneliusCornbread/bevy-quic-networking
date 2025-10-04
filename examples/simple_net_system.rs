@@ -1,4 +1,7 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::Path,
+};
 
 use bevy::{
     DefaultPlugins,
@@ -49,7 +52,6 @@ fn main() {
         .add_plugins(RemotePlugin::default())
         .add_plugins(RemoteHttpPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(PostUpdate, find_clients_without_connections)
         .add_systems(PostUpdate, debug_server)
         .run();
 }
@@ -57,16 +59,20 @@ fn main() {
 const IP: &str = "127.0.0.1:7777";
 
 fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
+    let cert_str_path = format!("{}/examples/certs/cert.pem", env!("CARGO_MANIFEST_DIR"));
+    let cert_path = Path::new(&cert_str_path);
+
+    let key_str_path = format!("{}/examples/certs/key.pem", env!("CARGO_MANIFEST_DIR"));
+    let key_path = Path::new(&key_str_path);
+
     let ip: SocketAddr = IP.parse().unwrap();
     info!("IP set to: {}", ip);
-    let server_comp = QuicServer::bind(&runtime, ip).expect("Unable to bind to server address");
+    let server_comp = QuicServer::bind(&runtime, ip, cert_path, key_path)
+        .expect("Unable to bind to server address");
 
     commands.spawn(server_comp);
-    let mut client_comp = QuicClient::new(&runtime);
 
-    let conn = client_comp.test_connection(Connect::new(ip));
-
-    conn.unwrap();
+    let mut client_comp = QuicClient::new_with_tls(&runtime, cert_path).expect("Invalid cert");
 
     commands
         .spawn_empty()

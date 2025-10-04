@@ -7,6 +7,7 @@ use std::{
 
 use bevy::{ecs::component::Component, log::info};
 use s2n_quic::{Connection, Server};
+use s2n_quic_tls::certificate::{self, IntoCertificate, IntoPrivateKey};
 use tokio::{
     runtime::Handle,
     sync::{
@@ -44,9 +45,14 @@ pub struct QuicServer {
 // TODO: make a function to allow the user to provide their own function to build a server,
 // for example providing your own TLS certs.
 impl QuicServer {
-    pub fn bind(runtime: &TokioRuntime, bind_ip: SocketAddr) -> Result<Self, Box<dyn Error>> {
+    pub fn bind<C: IntoCertificate, PK: IntoPrivateKey>(
+        runtime: &TokioRuntime,
+        bind_ip: SocketAddr,
+        certificate: C,
+        private_key: PK,
+    ) -> Result<Self, Box<dyn Error>> {
         let handle = runtime.handle().clone();
-        let server = runtime.block_on(build_server(bind_ip))?;
+        let server = runtime.block_on(build_server(bind_ip, certificate, private_key))?;
 
         let server_mutex = Arc::new(Mutex::new(server));
 
@@ -93,8 +99,16 @@ pub enum ConnectionPoll {
     NewConnection(QuicConnection, ConnectionId),
 }
 
-async fn build_server(ip: SocketAddr) -> Result<Server, Box<dyn Error>> {
-    let server = Server::builder().with_io(ip)?.start()?;
+async fn build_server<C: IntoCertificate, PK: IntoPrivateKey>(
+    ip: SocketAddr,
+    certificate: C,
+    private_key: PK,
+) -> Result<Server, Box<dyn Error>> {
+    let tls = s2n_quic_tls::Server::builder()
+        .with_certificate(certificate, private_key)?
+        .build()?;
+
+    let server = Server::builder().with_tls(tls)?.with_io(ip)?.start()?;
     Ok(server)
 }
 

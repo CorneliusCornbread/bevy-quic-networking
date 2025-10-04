@@ -1,16 +1,16 @@
-use std::{error::Error, sync::Arc};
+use std::sync::Arc;
 
-use bevy::ecs::component::Component;
+use bevy::ecs::{component::Component, system::Res};
 use s2n_quic::{
     Client, Connection,
     client::{Connect, ConnectionAttempt},
     connection::Error as ConnectionError,
-    provider::StartError,
 };
+use s2n_quic_tls::{certificate::IntoCertificate, error::Error as TlsError};
 use tokio::{runtime::Handle, sync::Mutex};
 
 use crate::common::connection::{
-    QuicConnection, QuicConnectionAttempt,
+    QuicConnectionAttempt,
     id::{ConnectionId, ConnectionIdGenerator},
     runtime::TokioRuntime,
 };
@@ -26,23 +26,28 @@ pub struct QuicClient {
 // This is going to need to be reworked, as is the server code.
 impl QuicClient {
     pub fn new(runtime: &TokioRuntime) -> Self {
-        let client_handle = runtime.spawn(build());
-        let client = runtime.block_on(client_handle).unwrap();
+        let client = runtime.block_on(build());
 
-        QuicClient {
+        Self {
             runtime: runtime.handle().clone(),
             client: Arc::new(Mutex::new(client)),
             id_gen: Default::default(),
         }
     }
 
-    // TODO: REMOVE ME
-    pub fn test_connection(&mut self, connect: Connect) -> Result<Connection, ConnectionError> {
-        let conn: Result<Connection, ConnectionError> = self
-            .runtime
-            .block_on(client_connection(self.client.clone(), connect));
+    pub fn new_with_tls<C: IntoCertificate>(
+        runtime: &TokioRuntime,
+        certificate: C,
+    ) -> Result<Self, TlsError> {
+        let client = runtime.block_on(build_tls(certificate))?;
 
-        conn
+        let ret = Self {
+            runtime: runtime.handle().clone(),
+            client: Arc::new(Mutex::new(client)),
+            id_gen: Default::default(),
+        };
+
+        Ok(ret)
     }
 
     pub(crate) fn open_connection(
@@ -76,11 +81,25 @@ async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, Con
 }
 
 async fn build() -> Client {
-    let tls = s2n_quic_tls::Client::builder(); // TODO: implement TLS providers
-
     Client::builder()
         .with_io("0.0.0.0:0")
         .expect("Unable to build client... are we... out of sockets??")
         .start()
         .expect("Unable to start client")
+}
+
+async fn build_tls<C: IntoCertificate>(certificate: C) -> Result<Client, TlsError> {
+    let tls = s2n_quic_tls::Client::builder()
+        .with_certificate(certificate)?
+        .build()?;
+
+    let client = Client::builder()
+        .with_io("0.0.0.0:0")
+        .expect("Unable to build client... are we... out of sockets??")
+        .with_tls(tls)
+        .expect("Invalid TLS")
+        .start()
+        .expect("Unable to start client");
+
+    Ok(client)
 }
