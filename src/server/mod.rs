@@ -1,34 +1,17 @@
-use std::{
-    error::Error,
-    net::SocketAddr,
-    sync::{Arc, atomic::Ordering},
-    time::Duration,
+use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+
+use bevy::ecs::component::Component;
+use s2n_quic::Server;
+use s2n_quic_tls::certificate::{IntoCertificate, IntoPrivateKey};
+use tokio::{runtime::Handle, sync::Mutex, task::JoinError};
+
+use crate::common::connection::{
+    QuicConnection,
+    id::{ConnectionId, ConnectionIdGenerator},
+    runtime::TokioRuntime,
 };
 
-use bevy::{ecs::component::Component, log::info};
-use s2n_quic::{Connection, Server};
-use s2n_quic_tls::certificate::{self, IntoCertificate, IntoPrivateKey};
-use tokio::{
-    runtime::Handle,
-    sync::{
-        Mutex,
-        mpsc::{self, Receiver, Sender},
-    },
-    task::{JoinError, JoinHandle},
-};
-
-use crate::{
-    common::{
-        connection::{
-            QuicConnection,
-            id::{ConnectionId, ConnectionIdGenerator},
-            runtime::TokioRuntime,
-        },
-        status_code::StatusCode,
-    },
-    server::flag::{AtomicPollFlag, PollState},
-};
-
+pub mod accepter;
 pub mod endpoint;
 pub mod flag;
 
@@ -42,8 +25,6 @@ pub struct QuicServer {
     id_gen: ConnectionIdGenerator,
 }
 
-// TODO: make a function to allow the user to provide their own function to build a server,
-// for example providing your own TLS certs.
 impl QuicServer {
     pub fn bind<C: IntoCertificate, PK: IntoPrivateKey>(
         runtime: &TokioRuntime,

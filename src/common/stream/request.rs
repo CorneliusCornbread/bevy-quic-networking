@@ -1,4 +1,4 @@
-use bevy::ecs::{hierarchy::ChildOf, system::EntityCommands};
+use bevy::ecs::{component::Component, hierarchy::ChildOf, system::EntityCommands};
 
 use crate::common::connection::QuicConnection;
 

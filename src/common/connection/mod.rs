@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 
 use bevy::{
     ecs::{bundle::Bundle, component::Component},
     prelude::{Deref, DerefMut},
 };
-use s2n_quic::{Connection, connection::Error as ConnectionError, stream::BidirectionalStream};
+use s2n_quic::{
+    Connection,
+    connection::Error as ConnectionError,
+    stream::{BidirectionalStream, PeerStream},
+};
 use tokio::{runtime::Handle, sync::Mutex, task::JoinHandle};
 
 use crate::common::{
@@ -52,16 +56,27 @@ impl QuicConnection {
         }
     }
 
-    pub(crate) fn get_connection(&self) -> Arc<Mutex<Connection>> {
-        self.connection.clone()
+    pub fn accept_streams(&mut self) -> Result<(PeerStream, StreamId), StreamPollError> {
+        let waker = Arc::new(futures::task::noop_waker_ref());
+        let mut cx = std::task::Context::from_waker(&waker);
+
+        let mut lock = self.connection.try_lock()?;
+        let poll = lock.poll_accept(&mut cx);
+
+        if let std::task::Poll::Ready(res) = poll
+            && let Ok(opt) = res
+            && let Some(stream) = opt
+        {
+            return Ok((stream, self.id_gen.generate_id()));
+        }
+
+        Err(StreamPollError::None)
     }
 
     pub(crate) fn open_bidrectional_stream(&mut self) -> BidirectionalSessionAttempt {
         let conn_task = self
             .runtime
             .spawn(open_bidirectional_task(self.connection.clone()));
-
-        let id = self.id_gen.generate_id();
 
         BidirectionalSessionAttempt(
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), conn_task),
@@ -91,4 +106,19 @@ async fn open_bidirectional_task(
     let rec_stream = QuicReceiveStream::new(Handle::current(), rec);
 
     Ok((rec_stream, send_stream))
+}
+
+#[derive(Debug)]
+pub enum StreamPollError {
+    None,
+    Error(Box<dyn Error>),
+}
+
+impl<E> From<E> for StreamPollError
+where
+    E: Error + 'static,
+{
+    fn from(err: E) -> Self {
+        StreamPollError::Error(Box::new(err))
+    }
 }

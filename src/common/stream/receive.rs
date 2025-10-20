@@ -5,7 +5,7 @@ use bevy::{
 };
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
-use std::error::Error;
+use std::{error::Error, sync::Arc};
 use tokio::{
     runtime::Handle,
     sync::mpsc::{self, Receiver, Sender},
@@ -46,12 +46,24 @@ impl QuicReceiveStream {
         }
     }
 
-    pub fn blocking_recv(&mut self) -> Option<RecvPacket> {
-        self.inbound_data.blocking_recv()
+    pub fn poll_recv(&mut self) -> Option<RecvPacket> {
+        let waker = Arc::new(futures::task::noop_waker_ref());
+        let mut cx = std::task::Context::from_waker(&waker);
+
+        let poll = self.inbound_data.poll_recv(&mut cx);
+
+        match poll {
+            std::task::Poll::Ready(data) => data,
+            std::task::Poll::Pending => None,
+        }
     }
 
     pub fn blocking_recv_many(&mut self, buffer: &mut Vec<RecvPacket>, limit: usize) -> usize {
         self.inbound_data.blocking_recv_many(buffer, limit)
+    }
+
+    pub fn is_open(&self) -> bool {
+        !self.rec_task.is_finished()
     }
 }
 
@@ -71,6 +83,7 @@ async fn rec_task(
     let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
     'running: loop {
+        info!("rec task");
         let mut break_flag = false;
 
         let command_count = control.recv_many(&mut command_buf, 100).await;

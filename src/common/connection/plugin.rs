@@ -1,6 +1,7 @@
 use bevy::{
     app::{Plugin, Update},
     ecs::{
+        component::Component,
         entity::Entity,
         hierarchy::ChildOf,
         system::{Commands, Query, Res},

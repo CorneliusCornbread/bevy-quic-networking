@@ -8,7 +8,10 @@ use bevy::{
     log::error,
 };
 
-use crate::common::stream::{QuicBidirectionalStreamAttempt, id::StreamId};
+use crate::common::{
+    attempt::QuicActionError,
+    stream::{QuicBidirectionalStreamAttempt, id::StreamId},
+};
 
 #[derive(Debug)]
 pub struct StreamAttemptPlugin;
@@ -34,7 +37,18 @@ fn handle_bidir_stream_attempt(
         let res = attempt.get_output();
 
         if let Err(e) = res {
-            error!("Error handling stream attempt: {:?}", e);
+            match e {
+                QuicActionError::InProgress => continue,
+                QuicActionError::Consumed => {
+                    error!("Stream attempt consumed for entity: {:?}", entity)
+                }
+                QuicActionError::Failed(error) => {
+                    error!("Stream attempt failed: {:?}", error)
+                }
+                QuicActionError::Crashed(join_error) => {
+                    error!("Stream attempt crashed: {:?}", join_error)
+                }
+            }
 
             #[cfg(feature = "stream-errors")]
             {

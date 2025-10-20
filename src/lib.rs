@@ -15,6 +15,7 @@ use crate::{
         stream::{plugin::StreamAttemptPlugin, session::QuicSessionPacketPlugin},
     },
     plugin::QuicAsyncPlugin,
+    server::accepter::SimpleServerAccepterPlugin,
 };
 
 pub struct QuicDefaultPlugins;
@@ -26,5 +27,6 @@ impl PluginGroup for QuicDefaultPlugins {
             .add(ConnectionAttemptPlugin)
             .add(StreamAttemptPlugin)
             .add(QuicSessionPacketPlugin)
+            .add(SimpleServerAccepterPlugin)
     }
 }

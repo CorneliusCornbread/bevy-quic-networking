@@ -2,14 +2,20 @@ use std::{net::SocketAddr, path::Path};
 
 use bevy::{
     DefaultPlugins,
-    app::{App, PostUpdate, Startup},
+    app::{App, FixedUpdate, PostUpdate, Startup},
     ecs::{
+        component::Component,
         entity::Entity,
-        hierarchy::Children,
+        hierarchy::{ChildOf, Children},
         query::{With, Without},
+        schedule::IntoScheduleConfigs,
         system::{Commands, Query, Res},
     },
-    log::{info, info_once},
+    input::{
+        common_conditions::{input_just_pressed, input_pressed},
+        keyboard::KeyCode,
+    },
+    log::{error, error_once, info, info_once},
     prelude::PluginGroup,
     remote::{RemotePlugin, http::RemoteHttpPlugin},
     render::{
@@ -22,7 +28,7 @@ use bevy_quic_networking::{
     client::QuicClient,
     common::{
         connection::{QuicConnection, request::ConnectionRequestExt, runtime::TokioRuntime},
-        stream::request::StreamRequestExt,
+        stream::{receive::QuicReceiveStream, request::StreamRequestExt, send::QuicSendStream},
     },
     server::QuicServer,
 };
@@ -47,8 +53,12 @@ fn main() {
         .add_plugins(RemotePlugin::default())
         .add_plugins(RemoteHttpPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(PostUpdate, debug_server)
-        //        .add_systems(PostUpdate, open_stream_client)
+        .add_systems(PostUpdate, client_open_stream)
+        .add_systems(PostUpdate, debug_receive)
+        .add_systems(
+            PostUpdate,
+            client_send.run_if(input_pressed(KeyCode::Space)),
+        )
         .run();
 }
 
@@ -79,49 +89,58 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
         .insert(client_comp);
 }
 
-fn open_stream_client(
+fn client_open_stream(
     mut commands: Commands,
-    quic_clients: Query<(Entity, &QuicClient, &Children)>,
-    mut quic_connections: Query<(Entity, &mut QuicConnection), Without<Children>>,
+    mut connection_query: Query<(Entity, &mut QuicConnection), Without<Children>>,
 ) {
-    for (client_entity, client, children) in quic_clients.iter() {
-        // Get all children that have QuicConnection but no Children component
-        for &child in children.iter() {
-            if let Ok((child_entity, mut connection)) = quic_connections.get_mut(child) {
-                info!(
-                    "QuicClient {:?} has no streams for connection {:?}",
-                    client_entity, child_entity
-                );
+    // TODO: I don't know why we need to call .entity here instead of an empty
+    // Maybe we should rethink this API
+    for (connection_entity, mut connection) in connection_query.iter_mut() {
+        commands
+            .entity(connection_entity)
+            .request_bidirectional_stream(&mut connection);
+    }
+}
 
-                commands
-                    .spawn_empty()
-                    .request_bidirectional_stream(&mut connection);
+// Query for all streams under QuicClient connections
+fn client_send(
+    client_query: Query<&Children, With<QuicClient>>,
+    connection_query: Query<&Children, With<QuicConnection>>,
+    mut send_stream_query: Query<(Entity, &mut QuicSendStream)>,
+    receive_stream_query: Query<(Entity, &QuicReceiveStream)>,
+) {
+    for client_children in client_query.iter() {
+        for &connection_entity in client_children.iter() {
+            // Check if this child is a QuicConnection
+            if let Ok(connection_children) = connection_query.get(connection_entity) {
+                // Iterate through the connection's children to find streams
+                for &stream_entity in connection_children.iter() {
+                    if let Ok((entity, mut send_stream)) = send_stream_query.get_mut(stream_entity)
+                    {
+                        info_once!("Found client QuicSendStream {:?}", entity);
+                        let res = send_stream.send("Yippieee".into());
+                        if let Err(e) = res {
+                            error!("Error sending data: {}", e);
+                        }
+
+                        info!("data sent!");
+                    }
+                }
             }
         }
     }
 }
 
-fn debug_server(servers: Query<&mut QuicServer>) {
-    for mut server in servers {
-        let res = server.poll_connection();
-
-        if res.is_err() {
-            info!("poll error");
-            continue;
+fn debug_receive(receivers: Query<&mut QuicReceiveStream>) {
+    for mut stream in receivers {
+        if !stream.is_open() {
+            error!("Stream closed");
         }
 
-        let conn = res.unwrap();
-
-        match conn {
-            bevy_quic_networking::server::ConnectionPoll::None => (),
-            bevy_quic_networking::server::ConnectionPoll::ServerClosed => {
-                info_once!("server closed")
-            }
-            // TODO: add connection handling for server to spawn connection component
-            bevy_quic_networking::server::ConnectionPoll::NewConnection(
-                quic_connection,
-                connection_id,
-            ) => info!("server new connection"),
+        if let Some(data) = stream.poll_recv() {
+            let bytes = data.payload;
+            let string = String::from_utf8_lossy(&bytes);
+            info_once!("Received message:\n{}", string);
         }
     }
 }

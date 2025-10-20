@@ -1,11 +1,14 @@
+use std::collections::btree_map::Range;
 use std::error::Error;
+use std::sync::Arc;
+use std::task::Poll;
 
 use aeronet::io::bytes::Bytes;
 use bevy::ecs::component::Component;
-use bevy::log::{info, warn};
+use bevy::log::{error, info, warn};
 use s2n_quic::stream::SendStream;
 use tokio::runtime::Handle;
-use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 
@@ -57,8 +60,8 @@ impl QuicSendStream {
         !self.send_task.is_finished()
     }
 
-    pub fn send(&mut self, data: Bytes) -> Result<(), SendError<Bytes>> {
-        self.outbound_data.blocking_send(data)
+    pub fn send(&mut self, data: Bytes) -> Result<(), TrySendError<Bytes>> {
+        self.outbound_data.try_send(data)
     }
 
     /// Take a vector of bytes and send bytes until an error is hit
@@ -83,6 +86,20 @@ impl QuicSendStream {
         }
 
         res
+    }
+
+    pub fn log_outstanding_errors(&mut self) {
+        let waker = Arc::new(futures::task::noop_waker_ref());
+        let mut cx = std::task::Context::from_waker(&waker);
+        let mut buf = vec![];
+
+        let poll = self.send_errors.poll_recv_many(&mut cx, &mut buf, 100);
+
+        if let Poll::Ready(count) = poll {
+            for err in &mut buf[..count] {
+                error!("Send task error: {}", err);
+            }
+        }
     }
 }
 
