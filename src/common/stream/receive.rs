@@ -1,11 +1,11 @@
 use aeronet::io::{bytes::Bytes, packet::RecvPacket};
 use bevy::{
     ecs::component::Component,
-    log::{info, warn},
+    log::{error, info, info_once, warn},
 };
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 use tokio::{
     runtime::Handle,
     sync::mpsc::{self, Receiver, Sender},
@@ -47,15 +47,11 @@ impl QuicReceiveStream {
     }
 
     pub fn poll_recv(&mut self) -> Option<RecvPacket> {
-        let waker = Arc::new(futures::task::noop_waker_ref());
-        let mut cx = std::task::Context::from_waker(&waker);
-
-        let poll = self.inbound_data.poll_recv(&mut cx);
-
-        match poll {
-            std::task::Poll::Ready(data) => data,
-            std::task::Poll::Pending => None,
+        if self.inbound_data.is_empty() {
+            return None;
         }
+
+        self.inbound_data.blocking_recv()
     }
 
     pub fn blocking_recv_many(&mut self, buffer: &mut Vec<RecvPacket>, limit: usize) -> usize {
@@ -64,6 +60,16 @@ impl QuicReceiveStream {
 
     pub fn is_open(&self) -> bool {
         !self.rec_task.is_finished()
+    }
+
+    pub fn print_rec_errors(&mut self) {
+        while !self.receive_errors.is_empty() {
+            let opt = self.receive_errors.blocking_recv();
+
+            if let Some(err) = opt {
+                error!("Receiver error: {}", err);
+            }
+        }
     }
 }
 
@@ -108,6 +114,8 @@ async fn rec_task(
 
         match data_res {
             Ok((size, is_open)) => {
+                info!("Data res: {}", size);
+
                 let instant = TokioInstant::now();
                 for data in read_buf[0..size].iter() {
                     let packet = RecvPacket {

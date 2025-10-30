@@ -131,11 +131,13 @@ fn client_send(
     }
 }
 
-fn debug_receive(receivers: Query<&mut QuicReceiveStream>) {
-    for mut stream in receivers {
+fn debug_receive(receivers: Query<(&mut QuicReceiveStream, Entity)>) {
+    for (mut stream, entity) in receivers {
         if !stream.is_open() {
             error!("Stream closed");
         }
+
+        stream.print_rec_errors();
 
         if let Some(data) = stream.poll_recv() {
             let bytes = data.payload;
