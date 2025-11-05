@@ -1,7 +1,7 @@
 use aeronet::io::{bytes::Bytes, packet::RecvPacket};
 use bevy::{
     ecs::component::Component,
-    log::{error, info, info_once, warn},
+    log::{error, info, info_once, tracing::Instrument, warn},
 };
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
@@ -31,12 +31,16 @@ impl QuicReceiveStream {
         let (inbound_data_sender, inbound_data) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (receive_error_sender, receive_errors) = mpsc::channel(CHANNEL_BUFF_SIZE);
 
-        let rec_task = runtime.spawn(rec_task(
-            rec,
-            inbound_control_receiver,
-            inbound_data_sender,
-            receive_error_sender,
-        ));
+        let span = bevy::log::info_span!("rec_task");
+        let rec_task = runtime.spawn(
+            rec_task(
+                rec,
+                inbound_control_receiver,
+                inbound_data_sender,
+                receive_error_sender,
+            )
+            .instrument(span),
+        );
 
         Self {
             rec_task,
@@ -51,6 +55,7 @@ impl QuicReceiveStream {
             return None;
         }
 
+        info!("received data");
         self.inbound_data.blocking_recv()
     }
 
@@ -83,16 +88,16 @@ async fn rec_task(
     inbound_sender: Sender<RecvPacket>,
     receive_errors: Sender<Box<dyn Error + Send + Sync>>,
 ) {
-    let mut command_buf = Vec::new();
+    //let mut command_buf = Vec::new();
 
     const BUFF_SIZE: usize = 100;
     let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
     'running: loop {
-        info!("rec task");
+        info!("Receive!");
         let mut break_flag = false;
 
-        let command_count = control.recv_many(&mut command_buf, 100).await;
+        /*         let command_count = control.recv_many(&mut command_buf, 100).await;
 
         for command in command_buf[..command_count].iter() {
             match command {
@@ -108,9 +113,32 @@ async fn rec_task(
                     break_flag = true;
                 }
             }
+        } */
+
+        match rec.receive().await {
+            Ok(data) => {
+                if let Some(packet) = data {
+                    info!("Data received");
+                    let instant = TokioInstant::now();
+
+                    let packet = RecvPacket {
+                        recv_at: instant.into_std(),
+                        payload: packet.clone(),
+                    };
+
+                    inbound_sender.try_send(packet).handle_err();
+                } else {
+                    info!("Stream closed?");
+                }
+            }
+            Err(e) => {
+                receive_errors.try_send(Box::new(e)).handle_err();
+                break_flag = true;
+            }
         }
 
-        let data_res = rec.receive_vectored(&mut read_buf).await;
+        /* let data_res = rec.receive_vectored(&mut read_buf).await;
+        info!("rec vectored returned");
 
         match data_res {
             Ok((size, is_open)) => {
@@ -136,7 +164,7 @@ async fn rec_task(
             Err(rec_err) => {
                 receive_errors.try_send(Box::new(rec_err)).handle_err();
             }
-        }
+        } */
 
         if break_flag {
             break 'running;

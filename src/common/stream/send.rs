@@ -5,6 +5,7 @@ use std::task::Poll;
 
 use aeronet::io::bytes::Bytes;
 use bevy::ecs::component::Component;
+use bevy::log::tracing::Instrument;
 use bevy::log::{error, info, warn};
 use s2n_quic::stream::SendStream;
 use tokio::runtime::Handle;
@@ -30,12 +31,16 @@ impl QuicSendStream {
         let (outbound_control, outbound_control_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (outbound_data, outbound_data_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
 
-        let send_task = runtime.spawn(outbound_send_task(
-            send,
-            outbound_control_receiver,
-            outbound_data_receiver,
-            send_error_sender,
-        ));
+        let span = bevy::log::info_span!("send_task");
+        let send_task = runtime.spawn(
+            outbound_send_task(
+                send,
+                outbound_control_receiver,
+                outbound_data_receiver,
+                send_error_sender,
+            )
+            .instrument(span),
+        );
 
         Self {
             send_task,
@@ -109,42 +114,43 @@ async fn outbound_send_task(
     mut outbound_receiver: Receiver<Bytes>,
     send_errors: Sender<Box<dyn Error + Send + Sync>>,
 ) {
-    let mut command_buf = Vec::new();
+    //let mut command_buf = Vec::new();
 
     'running: loop {
+        info!("Send!");
         let mut break_flag = false;
 
-        let command_count = control.recv_many(&mut command_buf, 100).await;
+        /* let command_count = control.recv_many(&mut command_buf, 100).await;
 
-        for i in 0..command_count {
-            let command_opt = command_buf.get(i);
+               for i in 0..command_count {
+                   let command_opt = command_buf.get(i);
 
-            if command_opt.is_none() {
-                // in theory this should never happen
-                break;
-            }
+                   if command_opt.is_none() {
+                       // in theory this should never happen
+                       break;
+                   }
 
-            match command_opt.unwrap() {
-                SendControlMessage::CloseAndQuit => {
-                    match send.close().await {
-                        Ok(_) => info!("Send stream closed, exiting send stream task..."),
-                        Err(e) => {
-                            warn!(
-                                "Send stream errored when closing: {e}\n Exiting send stream task..."
-                            )
-                        }
-                    }
-                    break_flag = true;
-                }
-                SendControlMessage::Flush => {
-                    let res = send.flush().await;
-                    if let Err(e) = res {
-                        send_errors.try_send(Box::new(e)).handle_err();
-                    }
-                }
-            }
-        }
-
+                   match command_opt.unwrap() {
+                       SendControlMessage::CloseAndQuit => {
+                           match send.close().await {
+                               Ok(_) => info!("Send stream closed, exiting send stream task..."),
+                               Err(e) => {
+                                   warn!(
+                                       "Send stream errored when closing: {e}\n Exiting send stream task..."
+                                   )
+                               }
+                           }
+                           break_flag = true;
+                       }
+                       SendControlMessage::Flush => {
+                           let res = send.flush().await;
+                           if let Err(e) = res {
+                               send_errors.try_send(Box::new(e)).handle_err();
+                           }
+                       }
+                   }
+               }
+        */
         // If we're quitting send all the ready to send messages we have in the buffer.
         // If there are more they get dropped.
         if break_flag {

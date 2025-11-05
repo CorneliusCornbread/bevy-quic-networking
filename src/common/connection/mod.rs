@@ -48,7 +48,10 @@ pub struct QuicConnection {
 pub struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
 
 impl QuicConnection {
-    pub fn new(runtime: Handle, connection: Connection) -> Self {
+    pub fn new(runtime: Handle, mut connection: Connection) -> Self {
+        connection
+            .keep_alive(true)
+            .expect("Unable to keep alive connection");
         Self {
             runtime,
             connection: Arc::new(Mutex::new(connection)),

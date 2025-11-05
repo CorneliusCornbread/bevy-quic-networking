@@ -134,7 +134,7 @@ fn client_send(
 fn debug_receive(receivers: Query<(&mut QuicReceiveStream, Entity)>) {
     for (mut stream, entity) in receivers {
         if !stream.is_open() {
-            error!("Stream closed");
+            error_once!("Stream closed");
         }
 
         stream.print_rec_errors();
