@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::Path};
 
 use bevy::{
     DefaultPlugins,
-    app::{App, FixedUpdate, PostUpdate, Startup},
+    app::{App, FixedUpdate, PostUpdate, Startup, Update},
     ecs::{
         component::Component,
         entity::Entity,
@@ -33,6 +33,7 @@ use bevy_quic_networking::{
     server::QuicServer,
 };
 use s2n_quic::client::Connect;
+use tokio::runtime;
 
 fn main() {
     let _app = App::new()
@@ -59,6 +60,7 @@ fn main() {
             PostUpdate,
             client_send.run_if(input_pressed(KeyCode::Space)),
         )
+        .add_systems(Update, server_accept_streams)
         .run();
 }
 
@@ -91,14 +93,17 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
 
 fn client_open_stream(
     mut commands: Commands,
-    mut connection_query: Query<(Entity, &mut QuicConnection), Without<Children>>,
+    mut connection_query: Query<(Entity, &mut QuicConnection, &ChildOf), Without<Children>>,
+    client_query: Query<&QuicClient>,
 ) {
-    // TODO: I don't know why we need to call .entity here instead of an empty
-    // Maybe we should rethink this API
-    for (connection_entity, mut connection) in connection_query.iter_mut() {
-        commands
-            .entity(connection_entity)
-            .request_bidirectional_stream(&mut connection);
+    for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
+        // TODO: I don't know why we need to call .entity here instead of an empty
+        // Maybe we should rethink this API
+        if client_query.get(parent.get()).is_ok() {
+            commands
+                .entity(connection_entity)
+                .request_bidirectional_stream(&mut connection);
+        }
     }
 }
 
@@ -143,6 +148,38 @@ fn debug_receive(receivers: Query<(&mut QuicReceiveStream, Entity)>) {
             let bytes = data.payload;
             let string = String::from_utf8_lossy(&bytes);
             info_once!("Received message:\n{}", string);
+        }
+    }
+}
+
+fn server_accept_streams(
+    mut commands: Commands,
+    mut connection_query: Query<(Entity, &mut QuicConnection, &ChildOf)>,
+    server_query: Query<&QuicServer>,
+    tokio: Res<TokioRuntime>,
+) {
+    let runtime = tokio.handle();
+
+    for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
+        // Only proceed if this connection's parent is a QuicServer
+        if server_query.get(parent.get()).is_ok() {
+            // Accept any pending streams
+            // (Adjust this based on your actual QuicConnection API)
+            if let Ok((stream, id)) = connection.accept_streams() {
+                // Spawn the stream as a child of this connection
+                match stream {
+                    s2n_quic::stream::PeerStream::Bidirectional(bidirectional_stream) => {
+                        let (rec, send) = bidirectional_stream.split();
+                        let send_comp = QuicSendStream::new(runtime.clone(), send);
+                        let rec_comp = QuicReceiveStream::new(runtime.clone(), rec);
+
+                        commands.entity(connection_entity).with_children(|parent| {
+                            parent.spawn((send_comp, rec_comp));
+                        });
+                    }
+                    s2n_quic::stream::PeerStream::Receive(receive_stream) => todo!(),
+                }
+            }
         }
     }
 }

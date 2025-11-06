@@ -5,7 +5,7 @@ use bevy::{
         hierarchy::ChildOf,
         system::{Commands, Query},
     },
-    log::error,
+    log::{error, info},
 };
 
 use crate::common::{
@@ -69,5 +69,6 @@ fn handle_bidir_stream_attempt(
         let bundle = (streams, *id, parent.clone());
         commands.entity(entity).despawn();
         commands.spawn(bundle);
+        info!("Spawning stream")
     }
 }

@@ -94,7 +94,9 @@ async fn rec_task(
     let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
     'running: loop {
-        info!("Receive!");
+        let addr = rec.connection().remote_addr();
+        let id = rec.id();
+        info!("Receive stream from: {:?}, with ID: {}", addr, id);
         let mut break_flag = false;
 
         /*         let command_count = control.recv_many(&mut command_buf, 100).await;

@@ -17,9 +17,3 @@ impl Default for TokioRuntime {
         )
     }
 }
-
-impl TokioRuntime {
-    pub fn handle(&self) -> &Handle {
-        self.0.handle()
-    }
-}
