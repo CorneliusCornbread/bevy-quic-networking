@@ -168,6 +168,7 @@ async fn rec_task(
 
         if break_flag {
             break 'running;
+            info!("Break flag tripped, quitting receive task!")
         }
     }
 }
