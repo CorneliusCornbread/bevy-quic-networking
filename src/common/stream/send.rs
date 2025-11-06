@@ -114,10 +114,13 @@ async fn outbound_send_task(
     mut outbound_receiver: Receiver<Bytes>,
     send_errors: Sender<Box<dyn Error + Send + Sync>>,
 ) {
+    let addr = send.connection().remote_addr();
+    let id = send.id();
+    info!("Opened send stream from: {:?}, with ID: {}", addr, id);
+
     //let mut command_buf = Vec::new();
 
     'running: loop {
-        info!("Send!");
         let mut break_flag = false;
 
         /* let command_count = control.recv_many(&mut command_buf, 100).await;

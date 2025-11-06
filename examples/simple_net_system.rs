@@ -28,7 +28,10 @@ use bevy_quic_networking::{
     client::QuicClient,
     common::{
         connection::{QuicConnection, request::ConnectionRequestExt, runtime::TokioRuntime},
-        stream::{receive::QuicReceiveStream, request::StreamRequestExt, send::QuicSendStream},
+        stream::{
+            id::StreamId, receive::QuicReceiveStream, request::StreamRequestExt,
+            send::QuicSendStream,
+        },
     },
     server::QuicServer,
 };
@@ -58,9 +61,9 @@ fn main() {
         .add_systems(PostUpdate, debug_receive)
         .add_systems(
             PostUpdate,
-            client_send.run_if(input_pressed(KeyCode::Space)),
+            client_send.run_if(input_just_pressed(KeyCode::Space)),
         )
-        .add_systems(Update, server_accept_streams)
+        .add_systems(PostUpdate, server_accept_streams)
         .run();
 }
 
@@ -127,8 +130,6 @@ fn client_send(
                         if let Err(e) = res {
                             error!("Error sending data: {}", e);
                         }
-
-                        info!("data sent!");
                     }
                 }
             }
@@ -147,7 +148,7 @@ fn debug_receive(receivers: Query<(&mut QuicReceiveStream, Entity)>) {
         if let Some(data) = stream.poll_recv() {
             let bytes = data.payload;
             let string = String::from_utf8_lossy(&bytes);
-            info_once!("Received message:\n{}", string);
+            info!("Received message: '{}'", string);
         }
     }
 }
@@ -162,7 +163,7 @@ fn server_accept_streams(
 
     for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
         // Only proceed if this connection's parent is a QuicServer
-        if server_query.get(parent.get()).is_ok() {
+        if server_query.get(parent.parent()).is_ok() {
             // Accept any pending streams
             // (Adjust this based on your actual QuicConnection API)
             if let Ok((stream, id)) = connection.accept_streams() {
@@ -174,7 +175,7 @@ fn server_accept_streams(
                         let rec_comp = QuicReceiveStream::new(runtime.clone(), rec);
 
                         commands.entity(connection_entity).with_children(|parent| {
-                            parent.spawn((send_comp, rec_comp));
+                            parent.spawn((send_comp, rec_comp, id));
                         });
                     }
                     s2n_quic::stream::PeerStream::Receive(receive_stream) => todo!(),

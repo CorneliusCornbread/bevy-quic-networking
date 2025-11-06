@@ -55,7 +55,6 @@ impl QuicReceiveStream {
             return None;
         }
 
-        info!("received data");
         self.inbound_data.blocking_recv()
     }
 
@@ -88,15 +87,16 @@ async fn rec_task(
     inbound_sender: Sender<RecvPacket>,
     receive_errors: Sender<Box<dyn Error + Send + Sync>>,
 ) {
+    let addr = rec.connection().remote_addr();
+    let id = rec.id();
+    info!("Opened receive stream from: {:?}, with ID: {}", addr, id);
+
     //let mut command_buf = Vec::new();
 
     const BUFF_SIZE: usize = 100;
     let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
     'running: loop {
-        let addr = rec.connection().remote_addr();
-        let id = rec.id();
-        info!("Receive stream from: {:?}, with ID: {}", addr, id);
         let mut break_flag = false;
 
         /*         let command_count = control.recv_many(&mut command_buf, 100).await;
@@ -120,7 +120,6 @@ async fn rec_task(
         match rec.receive().await {
             Ok(data) => {
                 if let Some(packet) = data {
-                    info!("Data received");
                     let instant = TokioInstant::now();
 
                     let packet = RecvPacket {
@@ -130,7 +129,8 @@ async fn rec_task(
 
                     inbound_sender.try_send(packet).handle_err();
                 } else {
-                    info!("Stream closed?");
+                    info!("Stream closed");
+                    break_flag = true;
                 }
             }
             Err(e) => {
