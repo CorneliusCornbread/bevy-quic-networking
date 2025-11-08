@@ -1,7 +1,7 @@
 use aeronet::io::{bytes::Bytes, packet::RecvPacket};
 use bevy::{
     ecs::component::Component,
-    log::{error, info, info_once, tracing::Instrument, warn},
+    log::{error, info, tracing::Instrument},
 };
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
@@ -129,7 +129,7 @@ async fn rec_task(
 
                     inbound_sender.try_send(packet).handle_err();
                 } else {
-                    info!("Stream closed");
+                    info!("Closing receive stream from: {:?}, with ID: {}", addr, id);
                     break_flag = true;
                 }
             }
@@ -170,7 +170,6 @@ async fn rec_task(
 
         if break_flag {
             break 'running;
-            info!("Break flag tripped, quitting receive task!")
         }
     }
 }

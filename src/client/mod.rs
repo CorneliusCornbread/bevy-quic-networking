@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bevy::ecs::{component::Component, system::Res};
+use bevy::ecs::component::Component;
 use s2n_quic::{
     Client, Connection,
     client::{Connect, ConnectionAttempt},
@@ -9,23 +9,25 @@ use s2n_quic::{
 use s2n_quic_tls::{certificate::IntoCertificate, error::Error as TlsError};
 use tokio::{runtime::Handle, sync::Mutex};
 
-use crate::common::connection::{
-    QuicConnectionAttempt,
-    id::{ConnectionId, ConnectionIdGenerator},
-    runtime::TokioRuntime,
+use crate::{
+    client::marker::QuicClientMarker,
+    common::connection::{
+        QuicConnectionAttempt,
+        id::{ConnectionId, ConnectionIdGenerator},
+        runtime::TokioRuntime,
+    },
 };
 
 pub mod marker;
 
 #[derive(Component)]
+#[require(QuicClientMarker)]
 pub struct QuicClient {
     runtime: Handle,
     client: Arc<Mutex<Client>>,
     id_gen: ConnectionIdGenerator,
 }
 
-// TODO: you can't actually use the builder from sync contexts :))))
-// This is going to need to be reworked, as is the server code.
 impl QuicClient {
     pub fn new(runtime: &TokioRuntime) -> Self {
         let client = runtime.block_on(build());
@@ -55,7 +57,7 @@ impl QuicClient {
     pub(crate) fn open_connection(
         &mut self,
         connect: Connect,
-    ) -> (QuicConnectionAttempt, ConnectionId) {
+    ) -> (QuicConnectionAttempt, ConnectionId, QuicClientMarker) {
         let client = &self.client.blocking_lock();
         let attempt = client.connect(connect);
 
@@ -64,18 +66,9 @@ impl QuicClient {
         (
             QuicConnectionAttempt::new(self.runtime.clone(), conn_task),
             self.id_gen.generate_id(),
+            Default::default(),
         )
     }
-}
-
-async fn client_connection(
-    client: Arc<Mutex<Client>>,
-    connect: Connect,
-) -> Result<Connection, ConnectionError> {
-    let lock = client.lock().await;
-    let attempt = lock.connect(connect);
-    drop(lock);
-    attempt.await
 }
 
 async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, ConnectionError> {

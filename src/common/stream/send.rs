@@ -1,4 +1,3 @@
-use std::collections::btree_map::Range;
 use std::error::Error;
 use std::sync::Arc;
 use std::task::Poll;
@@ -158,8 +157,24 @@ async fn outbound_send_task(
         // If there are more they get dropped.
         if break_flag {
             let message_count = outbound_receiver.len();
+            info!("Closing send stream from: {:?}, with ID: {}", addr, id);
+
             for _i in 0..message_count {
                 send_data(&mut send, &mut outbound_receiver, &send_errors).await;
+            }
+
+            info!(
+                "Send stream from: {:?}, with ID: {}, has been closed",
+                addr, id
+            );
+
+            let dropped_count = outbound_receiver.len();
+
+            if dropped_count > 0 {
+                warn!(
+                    "Send stream ID: {} dropped {} messages, this will result in loss of data being sent",
+                    id, dropped_count
+                )
             }
 
             break 'running;

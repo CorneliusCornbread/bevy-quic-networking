@@ -14,6 +14,7 @@ use crate::common::connection::{
 pub mod accepter;
 pub mod endpoint;
 pub mod flag;
+pub mod marker;
 
 const MAX_PENDING_CONNECTIONS: usize = 100;
 const POLL_SLEEP_DUR: Duration = Duration::from_millis(50);
