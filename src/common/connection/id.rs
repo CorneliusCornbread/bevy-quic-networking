@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bevy::ecs::component::Component;
 
 use crate::common::IdGenerator;
@@ -17,5 +19,11 @@ impl ConnectionIdGenerator {
         ConnectionId {
             id: self.generator.generate_unique(),
         }
+    }
+}
+
+impl fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ConnectionId({})", self.id)
     }
 }

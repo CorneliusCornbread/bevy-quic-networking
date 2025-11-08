@@ -31,7 +31,7 @@ impl QuicSendStream {
         let (outbound_control, outbound_control_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (outbound_data, outbound_data_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
 
-        let span = bevy::log::info_span!("send_task");
+        let span = bevy::log::info_span!("quic_send_task");
         let send_task = runtime.spawn(
             outbound_send_task(
                 send,

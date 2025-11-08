@@ -1,12 +1,11 @@
 use bevy::{
     app::{Plugin, Update},
     ecs::{
-        component::Component,
         entity::Entity,
         hierarchy::ChildOf,
         system::{Commands, Query, Res},
     },
-    log::error,
+    log::{error, info, info_span},
 };
 
 use crate::common::{
@@ -28,6 +27,8 @@ fn handle_connection_attempt(
     runtime: Res<TokioRuntime>,
     query: Query<(Entity, &mut QuicConnectionAttempt, &ConnectionId, &ChildOf)>,
 ) {
+    let _span = info_span!("handle_connection_attempt").entered();
+
     let handle_ref = runtime.handle();
 
     for entity_bundle in query {
@@ -38,20 +39,16 @@ fn handle_connection_attempt(
         if let Err(e) = res {
             match e {
                 QuicActionError::InProgress => {
-                    bevy::log::info_once!("In progress");
-
                     continue;
                 } // TODO: Setup a timeout
                 QuicActionError::Consumed => {
-                    bevy::log::info_once!("Consumed");
-
-                    continue; // Ignore dead components that are already consumed
+                    info!("Already consumed connection attempt hasn't been cleaned up: {entity}");
                 }
                 QuicActionError::Failed(error) => {
-                    bevy::log::error!("Error handling connection attempt: {:?}", error)
+                    error!("Error handling connection attempt: {:?}", error)
                 }
                 QuicActionError::Crashed(ref join_error) => {
-                    bevy::log::error!("Error joining connection attempt: {:?}", join_error)
+                    error!("Error joining connection attempt: {:?}", join_error)
                 }
             }
 
@@ -65,13 +62,12 @@ fn handle_connection_attempt(
                 commands.spawn(err_bundle);
             }
 
-            bevy::log::info!("despawning attempt entity");
             commands.entity(entity).despawn();
 
             continue;
         }
 
-        bevy::log::info!("Spawning connection entity");
+        info!("Spawning connection entity with {id}");
         let conn = res.unwrap();
         let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
 

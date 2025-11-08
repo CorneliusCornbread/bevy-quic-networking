@@ -15,6 +15,8 @@ use crate::common::connection::{
     runtime::TokioRuntime,
 };
 
+pub mod marker;
+
 #[derive(Component)]
 pub struct QuicClient {
     runtime: Handle,

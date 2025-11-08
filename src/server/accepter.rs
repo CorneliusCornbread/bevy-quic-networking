@@ -23,7 +23,8 @@ pub struct SimpleServerAccepterPlugin;
 
 impl Plugin for SimpleServerAccepterPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(Update, accept_connections);
+        app.add_systems(Update, accept_connections)
+            .add_systems(Update, accept_streams);
     }
 }
 
@@ -44,55 +45,39 @@ pub fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServe
             super::ConnectionPoll::NewConnection(quic_connection, connection_id) => {
                 let bundle = (quic_connection, connection_id, ChildOf(entity));
                 commands.spawn(bundle);
-                info!("spawning connection");
             }
         }
     }
 }
 
-pub fn accept_streams(
+fn accept_streams(
     mut commands: Commands,
-    query: Query<(Entity, &Children), With<QuicServer>>,
+    mut connection_query: Query<(Entity, &mut QuicConnection, &ChildOf)>,
+    server_query: Query<&QuicServer>,
     tokio: Res<TokioRuntime>,
-    mut connection_query: Query<(Entity, &mut QuicConnection)>,
 ) {
     let handle = tokio.handle();
 
-    for (_server_entity, children) in query.iter() {
-        for child in children {
-            let conn_opt = connection_query.get_mut(*child).ok();
-            if conn_opt.is_none() {
-                continue;
-            }
-
-            let (conn_entity, mut connection) = conn_opt.unwrap();
-
-            let res_stream = connection.accept_streams();
-
-            if let Err(e) = res_stream {
-                if let StreamPollError::Error(error) = e {
-                    error!("Error polling for new stream: {:?}", error)
-                }
-                continue;
-            }
-
-            let (stream, id) = res_stream.unwrap();
-            info!("spawning new stream");
-
+    for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
+        if server_query.get(parent.parent()).is_ok()
+            && let Ok((stream, id)) = connection.accept_streams()
+        {
             match stream {
                 PeerStream::Bidirectional(bidirectional_stream) => {
                     let (rec, send) = bidirectional_stream.split();
                     let quic_rec = QuicReceiveStream::new(handle.clone(), rec);
                     let quic_send = QuicSendStream::new(handle.clone(), send);
 
-                    let bundle = (quic_rec, quic_send, id, ChildOf(conn_entity));
-                    commands.spawn(bundle);
+                    commands.entity(connection_entity).with_children(|parent| {
+                        parent.spawn((quic_rec, quic_send, id));
+                    });
                 }
                 PeerStream::Receive(receive_stream) => {
                     let quic_rec = QuicReceiveStream::new(handle.clone(), receive_stream);
 
-                    let bundle = (quic_rec, id, ChildOf(conn_entity));
-                    commands.spawn(bundle);
+                    commands.entity(connection_entity).with_children(|parent| {
+                        parent.spawn((quic_rec, id));
+                    });
                 }
             }
         }

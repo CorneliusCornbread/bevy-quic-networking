@@ -63,7 +63,6 @@ fn main() {
             PostUpdate,
             client_send.run_if(input_just_pressed(KeyCode::Space)),
         )
-        .add_systems(PostUpdate, server_accept_streams)
         .run();
 }
 
@@ -149,38 +148,6 @@ fn debug_receive(receivers: Query<(&mut QuicReceiveStream, Entity)>) {
             let bytes = data.payload;
             let string = String::from_utf8_lossy(&bytes);
             info!("Received message: '{}'", string);
-        }
-    }
-}
-
-fn server_accept_streams(
-    mut commands: Commands,
-    mut connection_query: Query<(Entity, &mut QuicConnection, &ChildOf)>,
-    server_query: Query<&QuicServer>,
-    tokio: Res<TokioRuntime>,
-) {
-    let runtime = tokio.handle();
-
-    for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
-        // Only proceed if this connection's parent is a QuicServer
-        if server_query.get(parent.parent()).is_ok() {
-            // Accept any pending streams
-            // (Adjust this based on your actual QuicConnection API)
-            if let Ok((stream, id)) = connection.accept_streams() {
-                // Spawn the stream as a child of this connection
-                match stream {
-                    s2n_quic::stream::PeerStream::Bidirectional(bidirectional_stream) => {
-                        let (rec, send) = bidirectional_stream.split();
-                        let send_comp = QuicSendStream::new(runtime.clone(), send);
-                        let rec_comp = QuicReceiveStream::new(runtime.clone(), rec);
-
-                        commands.entity(connection_entity).with_children(|parent| {
-                            parent.spawn((send_comp, rec_comp, id));
-                        });
-                    }
-                    s2n_quic::stream::PeerStream::Receive(receive_stream) => todo!(),
-                }
-            }
         }
     }
 }

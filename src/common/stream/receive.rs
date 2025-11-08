@@ -31,7 +31,7 @@ impl QuicReceiveStream {
         let (inbound_data_sender, inbound_data) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (receive_error_sender, receive_errors) = mpsc::channel(CHANNEL_BUFF_SIZE);
 
-        let span = bevy::log::info_span!("rec_task");
+        let span = bevy::log::info_span!("quic_rec_task");
         let rec_task = runtime.spawn(
             rec_task(
                 rec,

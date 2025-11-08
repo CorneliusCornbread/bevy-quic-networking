@@ -60,8 +60,6 @@ impl<T> QuicActionAttempt<T> {
             return Err(creation_err);
         }
 
-        bevy::log::info!("Returning connection");
-
         Ok(res.unwrap())
     }
 }

@@ -5,7 +5,7 @@ use bevy::{
         hierarchy::ChildOf,
         system::{Commands, Query},
     },
-    log::{error, info},
+    log::{error, info, info_span},
 };
 
 use crate::common::{
@@ -31,6 +31,8 @@ fn handle_bidir_stream_attempt(
         &ChildOf,
     )>,
 ) {
+    let _span = info_span!("handle_bidir_stream_attempt").entered();
+
     for entity_bundle in query {
         let (entity, mut attempt, id, parent) = entity_bundle;
 
@@ -69,6 +71,6 @@ fn handle_bidir_stream_attempt(
         let bundle = (streams, *id, parent.clone());
         commands.entity(entity).despawn();
         commands.spawn(bundle);
-        info!("Spawning stream")
+        info!("Spawning stream {id}")
     }
 }
