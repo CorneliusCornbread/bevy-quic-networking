@@ -15,7 +15,7 @@ use crate::{
         connection::{QuicConnection, StreamPollError, runtime::TokioRuntime},
         stream::{receive::QuicReceiveStream, send::QuicSendStream},
     },
-    server::QuicServer,
+    server::{QuicServer, marker::QuicServerMarker},
 };
 
 #[derive(Debug)]
@@ -43,7 +43,12 @@ pub fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServe
             super::ConnectionPoll::None => continue,
             super::ConnectionPoll::ServerClosed => continue,
             super::ConnectionPoll::NewConnection(quic_connection, connection_id) => {
-                let bundle = (quic_connection, connection_id, ChildOf(entity));
+                let bundle = (
+                    quic_connection,
+                    connection_id,
+                    QuicServerMarker,
+                    ChildOf(entity),
+                );
                 commands.spawn(bundle);
             }
         }
@@ -69,14 +74,14 @@ fn accept_streams(
                     let quic_send = QuicSendStream::new(handle.clone(), send);
 
                     commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, quic_send, id));
+                        parent.spawn((quic_rec, quic_send, QuicServerMarker, id));
                     });
                 }
                 PeerStream::Receive(receive_stream) => {
                     let quic_rec = QuicReceiveStream::new(handle.clone(), receive_stream);
 
                     commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, id));
+                        parent.spawn((quic_rec, QuicServerMarker, id));
                     });
                 }
             }

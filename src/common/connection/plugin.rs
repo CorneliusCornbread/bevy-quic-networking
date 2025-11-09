@@ -3,14 +3,22 @@ use bevy::{
     ecs::{
         entity::Entity,
         hierarchy::ChildOf,
+        query::Has,
         system::{Commands, Query, Res},
     },
     log::{error, info, info_span},
 };
 
-use crate::common::{
-    attempt::QuicActionError,
-    connection::{QuicConnection, QuicConnectionAttempt, id::ConnectionId, runtime::TokioRuntime},
+use crate::{
+    client::marker::QuicClientMarker,
+    common::{
+        attempt::QuicActionError,
+        connection::{
+            QuicConnection, QuicConnectionAttempt, id::ConnectionId, runtime::TokioRuntime,
+        },
+        handle_markers,
+    },
+    server::marker::QuicServerMarker,
 };
 
 #[derive(Debug)]
@@ -21,18 +29,27 @@ impl Plugin for ConnectionAttemptPlugin {
         app.add_systems(Update, handle_connection_attempt);
     }
 }
-
+// Queries are going to be complex, wrapping them in a type is going to make
+// the system query harder to read
+#[allow(clippy::type_complexity)]
 fn handle_connection_attempt(
     mut commands: Commands,
     runtime: Res<TokioRuntime>,
-    query: Query<(Entity, &mut QuicConnectionAttempt, &ConnectionId, &ChildOf)>,
+    query: Query<(
+        Entity,
+        &mut QuicConnectionAttempt,
+        &ConnectionId,
+        &ChildOf,
+        Has<QuicClientMarker>,
+        Has<QuicServerMarker>,
+    )>,
 ) {
     let _span = info_span!("handle_connection_attempt").entered();
 
     let handle_ref = runtime.handle();
 
     for entity_bundle in query {
-        let (entity, mut attempt, id, parent) = entity_bundle;
+        let (entity, mut attempt, id, parent, client_marker, server_marker) = entity_bundle;
 
         let res = attempt.get_output();
 
@@ -73,6 +90,8 @@ fn handle_connection_attempt(
 
         let bundle = (quic_conn, *id, parent.clone());
         commands.entity(entity).despawn();
-        commands.spawn(bundle);
+        let mut e = commands.spawn(bundle);
+
+        handle_markers(&mut e, entity, server_marker, client_marker);
     }
 }

@@ -18,7 +18,6 @@ use crate::common::{
         id::{StreamId, StreamIdGenerator},
         receive::QuicReceiveStream,
         send::QuicSendStream,
-        session::QuicSession,
     },
 };
 

@@ -1,9 +1,15 @@
 use aeronet::io::packet::RecvPacket;
-use bevy::log::error;
+use bevy::{
+    ecs::{entity::Entity, system::EntityCommands},
+    log::{error, warn},
+};
 use std::{error::Error, sync::atomic::AtomicU64};
 use tokio::sync::mpsc::error::TrySendError;
 
-use crate::common::stream::id::StreamId;
+use crate::{
+    client::marker::QuicClientMarker, common::stream::id::StreamId,
+    server::marker::QuicServerMarker,
+};
 
 pub mod attempt;
 pub mod connection;
@@ -44,4 +50,40 @@ impl IdGenerator {
         self.current
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
+}
+
+pub fn handle_markers<'a>(
+    e: &mut EntityCommands<'a>,
+    entity: Entity,
+    is_server: bool,
+    is_client: bool,
+) {
+    match (is_client, is_server) {
+        // client
+        (true, false) => {
+            e.insert(QuicClientMarker);
+        }
+
+        // server
+        (false, true) => {
+            e.insert(QuicServerMarker);
+        }
+
+        // both? weird state that shouldn't happen
+        (true, true) => {
+            warn!(
+                "Entity {} had both client/server markers, this could result in weird behaviour.",
+                entity
+            );
+            e.insert((QuicServerMarker, QuicClientMarker));
+        }
+
+        // neither? this is fine but it may be ignored by the different system queries
+        (false, false) => {
+            warn!(
+                "Entity {} had no client/server markers, this may mean it's subsequent connection is not handled by systems which expect these markers.",
+                entity
+            );
+        }
+    };
 }

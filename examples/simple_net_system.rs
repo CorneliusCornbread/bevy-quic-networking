@@ -25,7 +25,7 @@ use bevy::{
 };
 use bevy_quic_networking::{
     QuicDefaultPlugins,
-    client::QuicClient,
+    client::{QuicClient, marker::QuicClientMarker},
     common::{
         connection::{QuicConnection, request::ConnectionRequestExt, runtime::TokioRuntime},
         stream::{
@@ -35,7 +35,7 @@ use bevy_quic_networking::{
     },
     server::QuicServer,
 };
-use s2n_quic::client::Connect;
+use s2n_quic::{client::Connect, stream::SendStream};
 use tokio::runtime;
 
 fn main() {
@@ -101,10 +101,10 @@ fn client_open_stream(
     for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
         // TODO: I don't know why we need to call .entity here instead of an empty
         // Maybe we should rethink this API
-        if client_query.get(parent.get()).is_ok() {
+        if client_query.get(parent.parent()).is_ok() {
             commands
                 .entity(connection_entity)
-                .request_bidirectional_stream(&mut connection);
+                .request_bidirectional_stream(&mut connection, false);
         }
     }
 }
@@ -134,6 +134,10 @@ fn client_send(
             }
         }
     }
+}
+
+fn client_send_easy(client_streams: Query<(&QuicSendStream, &QuicClientMarker)>) {
+    for (send_stream, marker) in client_streams {}
 }
 
 fn debug_receive(receivers: Query<(&mut QuicReceiveStream, Entity)>) {

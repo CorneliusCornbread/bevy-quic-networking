@@ -1,7 +1,7 @@
 use bevy::ecs::{hierarchy::ChildOf, system::EntityCommands};
 use s2n_quic::client::Connect;
 
-use crate::client::QuicClient;
+use crate::client::{QuicClient, marker::QuicClientMarker};
 
 pub trait ConnectionRequestExt {
     fn request_client_connection(&mut self, client: &mut QuicClient, connect: Connect)
@@ -16,7 +16,12 @@ impl<'a> ConnectionRequestExt for EntityCommands<'a> {
         connect: Connect,
     ) -> &mut Self {
         let conn_bundle = client.open_connection(connect);
-        let bundle = (conn_bundle.0, conn_bundle.1, ChildOf(self.id()));
+        let bundle = (
+            conn_bundle.0,
+            conn_bundle.1,
+            QuicClientMarker,
+            ChildOf(self.id()),
+        );
 
         self.commands().spawn(bundle);
         self
