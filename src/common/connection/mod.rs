@@ -36,7 +36,7 @@ impl QuicConnectionAttempt {
     }
 }
 
-#[derive(Debug, Component)]
+#[derive(Debug)]
 pub struct QuicConnection {
     runtime: Handle,
     connection: Arc<Mutex<Connection>>,

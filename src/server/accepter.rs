@@ -15,7 +15,7 @@ use crate::{
         connection::{QuicConnection, StreamPollError, runtime::TokioRuntime},
         stream::{receive::QuicReceiveStream, send::QuicSendStream},
     },
-    server::{QuicServer, marker::QuicServerMarker},
+    server::{QuicServer, connection::QuicServerConnection, marker::QuicServerMarker},
 };
 
 #[derive(Debug)]
@@ -57,7 +57,7 @@ pub fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServe
 
 fn accept_streams(
     mut commands: Commands,
-    mut connection_query: Query<(Entity, &mut QuicConnection, &ChildOf)>,
+    mut connection_query: Query<(Entity, &mut QuicServerConnection, &ChildOf)>,
     server_query: Query<&QuicServer>,
     tokio: Res<TokioRuntime>,
 ) {

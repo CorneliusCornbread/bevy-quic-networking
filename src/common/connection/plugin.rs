@@ -90,7 +90,7 @@ fn handle_connection_attempt(
 
         let bundle = (quic_conn, *id, parent.clone());
         commands.entity(entity).despawn();
-        let mut e = commands.spawn(bundle);
+        let mut e = commands.spawn(bundle); // TODO: change attempts to be client/server specific
 
         handle_markers(&mut e, entity, server_marker, client_marker);
     }

@@ -104,7 +104,7 @@ fn client_open_stream(
         if client_query.get(parent.parent()).is_ok() {
             commands
                 .entity(connection_entity)
-                .request_bidirectional_stream(&mut connection, false);
+                .request_bidirectional_stream(&mut connection);
         }
     }
 }

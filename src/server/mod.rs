@@ -5,13 +5,17 @@ use s2n_quic::Server;
 use s2n_quic_tls::certificate::{IntoCertificate, IntoPrivateKey};
 use tokio::{runtime::Handle, sync::Mutex, task::JoinError};
 
-use crate::common::connection::{
-    QuicConnection,
-    id::{ConnectionId, ConnectionIdGenerator},
-    runtime::TokioRuntime,
+use crate::{
+    common::connection::{
+        QuicConnection,
+        id::{ConnectionId, ConnectionIdGenerator},
+        runtime::TokioRuntime,
+    },
+    server::connection::QuicServerConnection,
 };
 
 pub mod accepter;
+pub mod connection;
 pub mod endpoint;
 pub mod flag;
 pub mod marker;
@@ -57,7 +61,7 @@ impl QuicServer {
             std::task::Poll::Ready(conn_opt) => {
                 if let Some(conn) = conn_opt {
                     let ret = ConnectionPoll::NewConnection(
-                        QuicConnection::new(self.runtime.clone(), conn),
+                        QuicServerConnection::new(self.runtime.clone(), conn),
                         self.id_gen.generate_id(),
                     );
 
@@ -78,7 +82,7 @@ impl QuicServer {
 pub enum ConnectionPoll {
     None,
     ServerClosed,
-    NewConnection(QuicConnection, ConnectionId),
+    NewConnection(QuicServerConnection, ConnectionId),
 }
 
 async fn build_server<C: IntoCertificate, PK: IntoPrivateKey>(
