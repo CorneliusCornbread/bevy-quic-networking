@@ -23,7 +23,7 @@ impl<'a> ConnectionRequestExt for EntityCommands<'a> {
             ChildOf(self.id()),
         );
 
-        self.commands().spawn(bundle);
+        //self.commands().spawn(bundle);
         self
     }
 }

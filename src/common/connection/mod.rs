@@ -26,12 +26,14 @@ pub mod plugin;
 pub mod request;
 pub mod runtime;
 
-#[derive(Deref, DerefMut, Component)]
-#[component(storage = "SparseSet")]
+#[derive(Deref, DerefMut)]
 pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
 
 impl QuicConnectionAttempt {
-    pub fn new(handle: Handle, conn_task: JoinHandle<Result<Connection, ConnectionError>>) -> Self {
+    pub(crate) fn new(
+        handle: Handle,
+        conn_task: JoinHandle<Result<Connection, ConnectionError>>,
+    ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task))
     }
 }

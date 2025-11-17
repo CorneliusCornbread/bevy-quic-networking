@@ -18,7 +18,10 @@ use crate::{
         },
         handle_markers,
     },
-    server::marker::QuicServerMarker,
+    server::{
+        connection::{QuicServerConnection, QuicServerConnectionAttempt},
+        marker::QuicServerMarker,
+    },
 };
 
 #[derive(Debug)]
@@ -26,30 +29,28 @@ pub struct ConnectionAttemptPlugin;
 
 impl Plugin for ConnectionAttemptPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(Update, handle_connection_attempt);
+        app.add_systems(Update, server_connection_attempt);
     }
 }
 // Queries are going to be complex, wrapping them in a type is going to make
 // the system query harder to read
 #[allow(clippy::type_complexity)]
-fn handle_connection_attempt(
+fn server_connection_attempt(
     mut commands: Commands,
     runtime: Res<TokioRuntime>,
     query: Query<(
         Entity,
-        &mut QuicConnectionAttempt,
+        &mut QuicServerConnectionAttempt,
         &ConnectionId,
         &ChildOf,
-        Has<QuicClientMarker>,
-        Has<QuicServerMarker>,
     )>,
 ) {
-    let _span = info_span!("handle_connection_attempt").entered();
+    let _span = info_span!("server_connection_attempt").entered();
 
     let handle_ref = runtime.handle();
 
     for entity_bundle in query {
-        let (entity, mut attempt, id, parent, client_marker, server_marker) = entity_bundle;
+        let (entity, mut attempt, id, parent) = entity_bundle;
 
         let res = attempt.get_output();
 
@@ -87,11 +88,10 @@ fn handle_connection_attempt(
         info!("Spawning connection entity with {id}");
         let conn = res.unwrap();
         let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
+        let server_conn = QuicServerConnection::from_connection(quic_conn);
 
-        let bundle = (quic_conn, *id, parent.clone());
+        let bundle = (server_conn, QuicServerMarker, *id, parent.clone());
         commands.entity(entity).despawn();
-        let mut e = commands.spawn(bundle); // TODO: change attempts to be client/server specific
-
-        handle_markers(&mut e, entity, server_marker, client_marker);
+        commands.spawn(bundle);
     }
 }

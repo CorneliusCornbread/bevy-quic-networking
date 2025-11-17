@@ -2,19 +2,15 @@ use std::{net::SocketAddr, path::Path};
 
 use bevy::{
     DefaultPlugins,
-    app::{App, FixedUpdate, PostUpdate, Startup, Update},
+    app::{App, PostUpdate, Startup},
     ecs::{
-        component::Component,
         entity::Entity,
         hierarchy::{ChildOf, Children},
         query::{With, Without},
         schedule::IntoScheduleConfigs,
         system::{Commands, Query, Res},
     },
-    input::{
-        common_conditions::{input_just_pressed, input_pressed},
-        keyboard::KeyCode,
-    },
+    input::{common_conditions::input_just_pressed, keyboard::KeyCode},
     log::{error, error_once, info, info_once},
     prelude::PluginGroup,
     remote::{RemotePlugin, http::RemoteHttpPlugin},
@@ -25,18 +21,14 @@ use bevy::{
 };
 use bevy_quic_networking::{
     QuicDefaultPlugins,
-    client::{QuicClient, marker::QuicClientMarker},
+    client::{QuicClient, connection::QuicClientConnection, marker::QuicClientMarker},
     common::{
         connection::{QuicConnection, request::ConnectionRequestExt, runtime::TokioRuntime},
-        stream::{
-            id::StreamId, receive::QuicReceiveStream, request::StreamRequestExt,
-            send::QuicSendStream,
-        },
+        stream::{receive::QuicReceiveStream, request::StreamRequestExt, send::QuicSendStream},
     },
     server::QuicServer,
 };
-use s2n_quic::{client::Connect, stream::SendStream};
-use tokio::runtime;
+use s2n_quic::client::Connect;
 
 fn main() {
     let _app = App::new()
@@ -95,7 +87,7 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
 
 fn client_open_stream(
     mut commands: Commands,
-    mut connection_query: Query<(Entity, &mut QuicConnection, &ChildOf), Without<Children>>,
+    mut connection_query: Query<(Entity, &mut QuicClientConnection, &ChildOf), Without<Children>>,
     client_query: Query<&QuicClient>,
 ) {
     for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
@@ -112,7 +104,7 @@ fn client_open_stream(
 // Query for all streams under QuicClient connections
 fn client_send(
     client_query: Query<&Children, With<QuicClient>>,
-    connection_query: Query<&Children, With<QuicConnection>>,
+    connection_query: Query<&Children, With<QuicClientConnection>>,
     mut send_stream_query: Query<(Entity, &mut QuicSendStream)>,
     receive_stream_query: Query<(Entity, &QuicReceiveStream)>,
 ) {
