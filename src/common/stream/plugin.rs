@@ -8,9 +8,14 @@ use bevy::{
     log::{error, info, info_span},
 };
 
-use crate::common::{
-    attempt::QuicActionError,
-    stream::{QuicBidirectionalStreamAttempt, id::StreamId},
+use crate::{
+    client::stream::{
+        QuicClientBidirectionalStreamAttempt, QuicClientReceiveStream, QuicClientSendStream,
+    },
+    common::{
+        attempt::QuicActionError,
+        stream::{id::StreamId, session::QuicSession},
+    },
 };
 
 #[derive(Debug)]
@@ -18,15 +23,15 @@ pub struct StreamAttemptPlugin;
 
 impl Plugin for StreamAttemptPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(Update, handle_bidir_stream_attempt);
+        app.add_systems(Update, client_bidir_stream_attempt);
     }
 }
 
-fn handle_bidir_stream_attempt(
+fn client_bidir_stream_attempt(
     mut commands: Commands,
     query: Query<(
         Entity,
-        &mut QuicBidirectionalStreamAttempt,
+        &mut QuicClientBidirectionalStreamAttempt,
         &StreamId,
         &ChildOf,
     )>,
@@ -52,6 +57,8 @@ fn handle_bidir_stream_attempt(
                 }
             }
 
+            let mut error_entity = commands.entity(entity);
+
             #[cfg(feature = "stream-errors")]
             {
                 use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
@@ -59,18 +66,23 @@ fn handle_bidir_stream_attempt(
                 let err_comp = QuicActionErrorComponent::new(e, SystemTime::now());
                 let err_bundle = (err_comp, *id, parent.clone());
 
-                commands.spawn(err_bundle);
+                error_entity.insert(err_bundle);
             }
-            commands.entity(entity).despawn();
+
+            error_entity.remove::<QuicClientBidirectionalStreamAttempt>();
 
             continue;
         }
 
-        let streams = res.unwrap();
+        let (rec, send) = res.unwrap();
+        let send_stream = QuicClientSendStream::from_send_stream(send);
+        let rec_stream = QuicClientReceiveStream::from_rec_stream(rec);
 
-        let bundle = (streams, *id, parent.clone());
-        commands.entity(entity).despawn();
-        commands.spawn(bundle);
-        info!("Spawning stream {id}")
+        info!("Spawning bidirectional stream with {id}");
+
+        commands
+            .entity(entity)
+            .remove::<QuicClientBidirectionalStreamAttempt>()
+            .insert((send_stream, rec_stream, QuicSession));
     }
 }

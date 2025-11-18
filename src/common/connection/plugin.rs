@@ -65,9 +65,7 @@ fn server_connection_attempt(
                 let err_comp = QuicActionErrorComponent::new(e, SystemTime::now());
                 let err_bundle = (err_comp, *id);
 
-                error_entity
-                    .remove::<QuicServerConnectionAttempt>()
-                    .insert(err_bundle);
+                error_entity.insert(err_bundle);
             }
 
             error_entity.remove::<QuicServerConnectionAttempt>();
@@ -75,7 +73,7 @@ fn server_connection_attempt(
             continue;
         }
 
-        info!("Spawning server connection entity with {id}");
+        info!("New server connection entity with {id}");
         let conn = res.unwrap();
         let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
         let conn_bundle = QuicServerConnection::from_connection(quic_conn);
@@ -136,7 +134,7 @@ fn client_connection_attempt(
             continue;
         }
 
-        info!("Spawning client connection entity with {id}");
+        info!("New client connection entity with {id}");
         let conn = res.unwrap();
         let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
         let conn_bundle = QuicClientConnection::from_connection(quic_conn);

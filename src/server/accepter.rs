@@ -2,20 +2,24 @@ use bevy::{
     app::{Plugin, Update},
     ecs::{
         entity::Entity,
-        hierarchy::{ChildOf, Children},
-        query::With,
+        hierarchy::ChildOf,
         system::{Commands, Query, Res},
     },
-    log::{error, info},
+    log::error,
 };
 use s2n_quic::stream::PeerStream;
 
 use crate::{
     common::{
-        connection::{QuicConnection, StreamPollError, runtime::TokioRuntime},
-        stream::{receive::QuicReceiveStream, send::QuicSendStream},
+        connection::runtime::TokioRuntime,
+        stream::{receive::QuicReceiveStream, send::QuicSendStream, session::QuicSession},
     },
-    server::{QuicServer, connection::QuicServerConnection, marker::QuicServerMarker},
+    server::{
+        QuicServer,
+        connection::QuicServerConnection,
+        marker::QuicServerMarker,
+        stream::{QuicServerReceiveStream, QuicServerSendStream},
+    },
 };
 
 #[derive(Debug)]
@@ -57,31 +61,28 @@ pub fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServe
 
 fn accept_streams(
     mut commands: Commands,
-    mut connection_query: Query<(Entity, &mut QuicServerConnection, &ChildOf)>,
-    server_query: Query<&QuicServer>,
+    connection_query: Query<(Entity, &mut QuicServerConnection)>,
     tokio: Res<TokioRuntime>,
 ) {
     let handle = tokio.handle();
 
-    for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
-        if server_query.get(parent.parent()).is_ok()
-            && let Ok((stream, id)) = connection.accept_streams()
-        {
+    for (connection_entity, mut connection) in connection_query {
+        if let Ok((stream, id)) = connection.accept_streams() {
             match stream {
                 PeerStream::Bidirectional(bidirectional_stream) => {
                     let (rec, send) = bidirectional_stream.split();
-                    let quic_rec = QuicReceiveStream::new(handle.clone(), rec);
-                    let quic_send = QuicSendStream::new(handle.clone(), send);
+                    let quic_rec = QuicServerReceiveStream::new(handle.clone(), rec);
+                    let quic_send = QuicServerSendStream::new(handle.clone(), send);
 
                     commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, quic_send, QuicServerMarker, id));
+                        parent.spawn((quic_rec, quic_send, QuicServerMarker, QuicSession, id));
                     });
                 }
                 PeerStream::Receive(receive_stream) => {
-                    let quic_rec = QuicReceiveStream::new(handle.clone(), receive_stream);
+                    let quic_rec = QuicServerReceiveStream::new(handle.clone(), receive_stream);
 
                     commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, QuicServerMarker, id));
+                        parent.spawn((quic_rec, QuicServerMarker, QuicSession, id));
                     });
                 }
             }

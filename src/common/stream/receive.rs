@@ -17,7 +17,6 @@ use crate::common::HandleChannelError;
 
 const CHANNEL_BUFF_SIZE: usize = 256;
 
-#[derive(Component)]
 pub struct QuicReceiveStream {
     rec_task: JoinHandle<()>,
     inbound_data: Receiver<RecvPacket>,

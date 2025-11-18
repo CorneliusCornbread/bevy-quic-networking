@@ -1,8 +1,4 @@
-use aeronet::io::SessionEndpoint;
-use bevy::{
-    ecs::component::Component,
-    prelude::{Deref, DerefMut},
-};
+use bevy::prelude::{Deref, DerefMut};
 use tokio::{runtime::Handle, task::JoinHandle};
 
 use crate::common::{
@@ -13,12 +9,10 @@ use crate::common::{
 pub mod id;
 pub mod plugin;
 pub mod receive;
-pub mod request;
 pub mod send;
 pub mod session;
 
-#[derive(Deref, DerefMut, Component)]
-#[require(SessionEndpoint)]
+#[derive(Deref, DerefMut)]
 pub struct QuicReceiveStreamAttempt(QuicActionAttempt<QuicReceiveStream>);
 
 impl QuicReceiveStreamAttempt {
@@ -30,8 +24,7 @@ impl QuicReceiveStreamAttempt {
     }
 }
 
-#[derive(Deref, DerefMut, Component)]
-#[require(SessionEndpoint)]
+#[derive(Deref, DerefMut)]
 pub struct QuicSendStreamAttempt(QuicActionAttempt<QuicSendStream>);
 
 impl QuicSendStreamAttempt {
@@ -43,8 +36,7 @@ impl QuicSendStreamAttempt {
     }
 }
 
-#[derive(Deref, DerefMut, Component)]
-#[require(SessionEndpoint)]
+#[derive(Deref, DerefMut)]
 pub struct QuicBidirectionalStreamAttempt(QuicActionAttempt<(QuicReceiveStream, QuicSendStream)>);
 
 impl QuicBidirectionalStreamAttempt {

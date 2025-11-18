@@ -1,4 +1,8 @@
-use bevy::ecs::component::Component;
+use bevy::{
+    ecs::component::Component,
+    prelude::{Deref, DerefMut},
+};
+use s2n_quic::stream::{ReceiveStream, SendStream};
 use tokio::{runtime::Handle, task::JoinHandle};
 
 use crate::{
@@ -20,5 +24,33 @@ impl QuicServerBidirectionalStreamAttempt {
         >,
     ) -> Self {
         Self(QuicBidirectionalStreamAttempt::new(handle, conn_task))
+    }
+}
+
+#[derive(Deref, DerefMut, Component)]
+#[require(QuicServerMarker)]
+pub struct QuicServerSendStream(QuicSendStream);
+
+impl QuicServerSendStream {
+    pub fn new(runtime: Handle, send: SendStream) -> Self {
+        Self(QuicSendStream::new(runtime, send))
+    }
+
+    pub(crate) fn from_send_stream(quic_send: QuicSendStream) -> Self {
+        Self(quic_send)
+    }
+}
+
+#[derive(Deref, DerefMut, Component)]
+#[require(QuicServerMarker)]
+pub struct QuicServerReceiveStream(QuicReceiveStream);
+
+impl QuicServerReceiveStream {
+    pub fn new(runtime: Handle, rec: ReceiveStream) -> Self {
+        Self(QuicReceiveStream::new(runtime, rec))
+    }
+
+    pub(crate) fn from_rec_stream(quic_rec: QuicReceiveStream) -> Self {
+        Self(quic_rec)
     }
 }

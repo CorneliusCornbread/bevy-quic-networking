@@ -24,7 +24,6 @@ use crate::common::{
 
 pub mod id;
 pub mod plugin;
-pub mod request;
 pub mod runtime;
 
 #[derive(Deref, DerefMut)]
@@ -46,7 +45,6 @@ pub struct QuicConnection {
     id_gen: StreamIdGenerator,
 }
 
-#[derive(Bundle)]
 pub(crate) struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
 
 impl QuicConnection {

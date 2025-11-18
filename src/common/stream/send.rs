@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use aeronet::io::bytes::Bytes;
-use bevy::ecs::component::Component;
 use bevy::log::tracing::Instrument;
 use bevy::log::{error, info, warn};
 use s2n_quic::stream::SendStream;
@@ -16,7 +15,6 @@ use crate::common::HandleChannelError;
 
 const CHANNEL_BUFF_SIZE: usize = 256;
 
-#[derive(Component)]
 pub struct QuicSendStream {
     send_task: JoinHandle<()>,
     outbound_data: Sender<Bytes>,

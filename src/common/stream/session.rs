@@ -6,9 +6,13 @@ use bevy::{
 };
 use std::time::Instant;
 
-use crate::common::stream::{id::StreamId, receive::QuicReceiveStream, send::QuicSendStream};
+use crate::{
+    client::stream::QuicClientSendStream,
+    common::stream::{id::StreamId, receive::QuicReceiveStream},
+    server::stream::QuicServerReceiveStream,
+};
 
-const MIN_MTU: usize = 1024;
+const MIN_MTU: usize = 1200;
 const MAX_PACKET_TRANSFER: usize = 512;
 const PACKET_WARN_THRESH: usize = 400;
 
@@ -20,12 +24,15 @@ pub struct QuicSessionPacketPlugin;
 
 impl Plugin for QuicSessionPacketPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(PreUpdate, drain_recv_packets)
-            .add_systems(PreUpdate, drain_send_packets);
+        // TODO: reenable this
+        //app.add_systems(PreUpdate, drain_recv_packets)
+        //    .add_systems(PreUpdate, drain_send_packets);
     }
 }
 
-fn drain_recv_packets(query: Query<(&mut Session, &mut QuicReceiveStream), With<QuicSession>>) {
+fn drain_recv_packets(
+    query: Query<(&mut Session, &mut QuicServerReceiveStream), With<QuicSession>>,
+) {
     let mut buffer = Vec::new();
 
     for entity in query {
@@ -57,7 +64,7 @@ fn drain_recv_packets(query: Query<(&mut Session, &mut QuicReceiveStream), With<
 }
 
 fn drain_send_packets(
-    query: Query<(&mut Session, &mut QuicSendStream, &StreamId), With<QuicSession>>,
+    query: Query<(&mut Session, &mut QuicClientSendStream, &StreamId), With<QuicSession>>,
 ) {
     for entity in query {
         let (mut session, mut send, id) = entity;

@@ -21,12 +21,15 @@ use bevy::{
 };
 use bevy_quic_networking::{
     QuicDefaultPlugins,
-    client::{QuicClient, connection::QuicClientConnection, marker::QuicClientMarker},
+    client::{
+        QuicClient, connection::QuicClientConnection, marker::QuicClientMarker,
+        stream::QuicClientSendStream,
+    },
     common::{
         connection::runtime::TokioRuntime,
         stream::{receive::QuicReceiveStream, send::QuicSendStream},
     },
-    server::QuicServer,
+    server::{QuicServer, stream::QuicServerReceiveStream},
 };
 use s2n_quic::client::Connect;
 
@@ -98,8 +101,7 @@ fn client_open_stream(
 fn client_send(
     client_query: Query<&Children, With<QuicClient>>,
     connection_query: Query<&Children, With<QuicClientConnection>>,
-    mut send_stream_query: Query<(Entity, &mut QuicSendStream)>,
-    receive_stream_query: Query<(Entity, &QuicReceiveStream)>,
+    mut send_stream_query: Query<(Entity, &mut QuicClientSendStream)>,
 ) {
     for client_children in client_query.iter() {
         for &connection_entity in client_children.iter() {
@@ -121,11 +123,11 @@ fn client_send(
     }
 }
 
-fn client_send_easy(client_streams: Query<(&QuicSendStream, &QuicClientMarker)>) {
-    for (send_stream, marker) in client_streams {}
+fn client_send_easy(client_streams: Query<(&QuicClientSendStream)>) {
+    for (send_stream) in client_streams {}
 }
 
-fn debug_receive(receivers: Query<(&mut QuicReceiveStream, Entity)>) {
+fn debug_receive(receivers: Query<(&mut QuicServerReceiveStream, Entity)>) {
     for (mut stream, entity) in receivers {
         if !stream.is_open() {
             error_once!("Stream closed");
