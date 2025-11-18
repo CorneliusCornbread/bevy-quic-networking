@@ -10,9 +10,8 @@ use s2n_quic_tls::{certificate::IntoCertificate, error::Error as TlsError};
 use tokio::{runtime::Handle, sync::Mutex};
 
 use crate::{
-    client::marker::QuicClientMarker,
+    client::{connection::QuicClientConnectionAttempt, marker::QuicClientMarker},
     common::connection::{
-        QuicConnectionAttempt,
         id::{ConnectionId, ConnectionIdGenerator},
         runtime::TokioRuntime,
     },
@@ -20,6 +19,7 @@ use crate::{
 
 pub mod connection;
 pub mod marker;
+pub mod stream;
 
 #[derive(Component)]
 #[require(QuicClientMarker)]
@@ -55,19 +55,18 @@ impl QuicClient {
         Ok(ret)
     }
 
-    pub(crate) fn open_connection(
+    pub fn open_connection(
         &mut self,
         connect: Connect,
-    ) -> (QuicConnectionAttempt, ConnectionId, QuicClientMarker) {
+    ) -> (QuicClientConnectionAttempt, ConnectionId) {
         let client = &self.client.blocking_lock();
         let attempt = client.connect(connect);
 
         let conn_task = self.runtime.spawn(create_connection(attempt));
 
         (
-            QuicConnectionAttempt::new(self.runtime.clone(), conn_task),
+            QuicClientConnectionAttempt::new(self.runtime.clone(), conn_task),
             self.id_gen.generate_id(),
-            Default::default(),
         )
     }
 }

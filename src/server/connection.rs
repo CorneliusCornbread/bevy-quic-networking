@@ -5,10 +5,14 @@ use bevy::{
 use s2n_quic::{Connection, connection::Error as ConnectionError};
 use tokio::{runtime::Handle, task::JoinHandle};
 
-use crate::common::connection::{QuicConnection, QuicConnectionAttempt};
+use crate::{
+    common::connection::{QuicConnection, QuicConnectionAttempt},
+    server::marker::QuicServerMarker,
+};
 
 #[derive(Deref, DerefMut, Component)]
 #[component(storage = "SparseSet")]
+#[require(QuicServerMarker)]
 pub struct QuicServerConnectionAttempt(QuicConnectionAttempt);
 
 impl QuicServerConnectionAttempt {
@@ -18,6 +22,7 @@ impl QuicServerConnectionAttempt {
 }
 
 #[derive(Debug, Component, Deref, DerefMut)]
+#[require(QuicServerMarker)]
 pub struct QuicServerConnection {
     connection: QuicConnection,
 }

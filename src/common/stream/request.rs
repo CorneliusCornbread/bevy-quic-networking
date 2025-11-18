@@ -2,6 +2,7 @@ use bevy::ecs::{component::Component, hierarchy::ChildOf, system::EntityCommands
 
 use crate::common::connection::QuicConnection;
 
+#[deprecated]
 pub trait StreamRequestExt {
     fn request_bidirectional_stream(&mut self, connection: &mut QuicConnection) -> &mut Self;
     fn request_receive_stream(&mut self, connection: &mut QuicConnection) -> &mut Self;

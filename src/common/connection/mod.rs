@@ -2,6 +2,7 @@ use std::{error::Error, sync::Arc};
 
 use bevy::{
     ecs::{bundle::Bundle, component::Component},
+    log::warn,
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::{
@@ -46,13 +47,19 @@ pub struct QuicConnection {
 }
 
 #[derive(Bundle)]
-pub struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
+pub(crate) struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
 
 impl QuicConnection {
-    pub fn new(runtime: Handle, mut connection: Connection) -> Self {
-        connection
-            .keep_alive(true)
-            .expect("Unable to keep alive connection");
+    pub(crate) fn new(runtime: Handle, mut connection: Connection) -> Self {
+        let res = connection.keep_alive(true);
+
+        if let Err(e) = res {
+            warn!(
+                "Unable to mark new connection with keep alive, is the connection already closed? Reason: \"{}\"",
+                e
+            )
+        }
+
         Self {
             runtime,
             connection: Arc::new(Mutex::new(connection)),
@@ -60,7 +67,7 @@ impl QuicConnection {
         }
     }
 
-    pub fn accept_streams(&mut self) -> Result<(PeerStream, StreamId), StreamPollError> {
+    pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, StreamId), StreamPollError> {
         let waker = Arc::new(futures::task::noop_waker_ref());
         let mut cx = std::task::Context::from_waker(&waker);
 

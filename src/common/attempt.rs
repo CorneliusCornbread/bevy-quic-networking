@@ -1,15 +1,12 @@
 use std::{sync::Arc, time::SystemTime};
 
-use bevy::{ecs::component::Component, time::Time};
+use bevy::ecs::component::Component;
 use s2n_quic::connection::Error as ConnectionError;
 use tokio::{
     runtime::Handle,
     task::{JoinError, JoinHandle},
 };
 
-// TODO: Figure out how we want to structure endpoints in regards to these attempts
-// atm both streams and connectionss would have endpoints which doesn't make sense.
-// This would also make it look like there's a constant endpoint pending a connection.
 pub struct QuicActionAttempt<T> {
     runtime: Handle,
     conn_task: Option<JoinHandle<Result<T, ConnectionError>>>,

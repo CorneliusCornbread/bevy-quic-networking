@@ -11,7 +11,7 @@ use crate::{
         id::{ConnectionId, ConnectionIdGenerator},
         runtime::TokioRuntime,
     },
-    server::connection::QuicServerConnection,
+    server::{connection::QuicServerConnection, marker::QuicServerMarker},
 };
 
 pub mod accepter;
@@ -19,11 +19,13 @@ pub mod connection;
 pub mod endpoint;
 pub mod flag;
 pub mod marker;
+pub mod stream;
 
 const MAX_PENDING_CONNECTIONS: usize = 100;
 const POLL_SLEEP_DUR: Duration = Duration::from_millis(50);
 
 #[derive(Component)]
+#[require(QuicServerMarker)]
 pub struct QuicServer {
     runtime: Handle,
     server: Arc<Mutex<Server>>,

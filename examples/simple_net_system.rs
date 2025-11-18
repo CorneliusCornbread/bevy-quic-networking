@@ -23,8 +23,8 @@ use bevy_quic_networking::{
     QuicDefaultPlugins,
     client::{QuicClient, connection::QuicClientConnection, marker::QuicClientMarker},
     common::{
-        connection::{QuicConnection, request::ConnectionRequestExt, runtime::TokioRuntime},
-        stream::{receive::QuicReceiveStream, request::StreamRequestExt, send::QuicSendStream},
+        connection::runtime::TokioRuntime,
+        stream::{receive::QuicReceiveStream, send::QuicSendStream},
     },
     server::QuicServer,
 };
@@ -75,29 +75,22 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
     commands.spawn(server_comp);
 
     let mut client_comp = QuicClient::new_with_tls(&runtime, cert_path).expect("Invalid cert");
+    let connect = Connect::new(ip).with_server_name("localhost");
+    let conn_bundle = client_comp.open_connection(connect);
 
-    commands
-        .spawn_empty()
-        .request_client_connection(
-            &mut client_comp,
-            Connect::new(ip).with_server_name("localhost"),
-        )
-        .insert(client_comp);
+    // Spawn client with connection attempt as child
+    commands.spawn(client_comp).with_children(|parent| {
+        parent.spawn(conn_bundle);
+    });
 }
 
 fn client_open_stream(
     mut commands: Commands,
-    mut connection_query: Query<(Entity, &mut QuicClientConnection, &ChildOf), Without<Children>>,
-    client_query: Query<&QuicClient>,
+    connection_query: Query<(Entity, &mut QuicClientConnection), Without<Children>>,
 ) {
-    for (connection_entity, mut connection, parent) in connection_query.iter_mut() {
-        // TODO: I don't know why we need to call .entity here instead of an empty
-        // Maybe we should rethink this API
-        if client_query.get(parent.parent()).is_ok() {
-            commands
-                .entity(connection_entity)
-                .request_bidirectional_stream(&mut connection);
-        }
+    for (entity, mut connection) in connection_query {
+        let stream_bundle = connection.open_bidrectional_stream();
+        commands.spawn((stream_bundle, ChildOf(entity)));
     }
 }
 
