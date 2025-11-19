@@ -6,12 +6,12 @@ use bevy::{
     ecs::{
         entity::Entity,
         hierarchy::{ChildOf, Children},
-        query::{With, Without},
+        query::Without,
         schedule::IntoScheduleConfigs,
         system::{Commands, Query, Res},
     },
     input::{common_conditions::input_just_pressed, keyboard::KeyCode},
-    log::{error, error_once, info, info_once},
+    log::{error, error_once, info},
     prelude::PluginGroup,
     remote::{RemotePlugin, http::RemoteHttpPlugin},
     render::{
@@ -21,14 +21,8 @@ use bevy::{
 };
 use bevy_quic_networking::{
     QuicDefaultPlugins,
-    client::{
-        QuicClient, connection::QuicClientConnection, marker::QuicClientMarker,
-        stream::QuicClientSendStream,
-    },
-    common::{
-        connection::runtime::TokioRuntime,
-        stream::{receive::QuicReceiveStream, send::QuicSendStream},
-    },
+    client::{QuicClient, connection::QuicClientConnection, stream::QuicClientSendStream},
+    common::connection::runtime::TokioRuntime,
     server::{QuicServer, stream::QuicServerReceiveStream},
 };
 use s2n_quic::client::Connect;
@@ -97,38 +91,17 @@ fn client_open_stream(
     }
 }
 
-// Query for all streams under QuicClient connections
-fn client_send(
-    client_query: Query<&Children, With<QuicClient>>,
-    connection_query: Query<&Children, With<QuicClientConnection>>,
-    mut send_stream_query: Query<(Entity, &mut QuicClientSendStream)>,
-) {
-    for client_children in client_query.iter() {
-        for &connection_entity in client_children.iter() {
-            // Check if this child is a QuicConnection
-            if let Ok(connection_children) = connection_query.get(connection_entity) {
-                // Iterate through the connection's children to find streams
-                for &stream_entity in connection_children.iter() {
-                    if let Ok((entity, mut send_stream)) = send_stream_query.get_mut(stream_entity)
-                    {
-                        info_once!("Found client QuicSendStream {:?}", entity);
-                        let res = send_stream.send("Yippieee".into());
-                        if let Err(e) = res {
-                            error!("Error sending data: {}", e);
-                        }
-                    }
-                }
-            }
+fn client_send(client_streams: Query<&mut QuicClientSendStream>) {
+    for mut send_stream in client_streams {
+        let res = send_stream.send("Yippieee".into());
+        if let Err(e) = res {
+            error!("Error sending data: {}", e);
         }
     }
 }
 
-fn client_send_easy(client_streams: Query<(&QuicClientSendStream)>) {
-    for (send_stream) in client_streams {}
-}
-
-fn debug_receive(receivers: Query<(&mut QuicServerReceiveStream, Entity)>) {
-    for (mut stream, entity) in receivers {
+fn debug_receive(receivers: Query<&mut QuicServerReceiveStream>) {
+    for mut stream in receivers {
         if !stream.is_open() {
             error_once!("Stream closed");
         }
