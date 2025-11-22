@@ -1,4 +1,4 @@
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use std::{error::Error, net::SocketAddr, sync::Arc};
 
 use bevy::ecs::component::Component;
 use s2n_quic::Server;
@@ -7,7 +7,6 @@ use tokio::{runtime::Handle, sync::Mutex, task::JoinError};
 
 use crate::{
     common::connection::{
-        QuicConnection,
         id::{ConnectionId, ConnectionIdGenerator},
         runtime::TokioRuntime,
     },
@@ -16,13 +15,8 @@ use crate::{
 
 pub mod accepter;
 pub mod connection;
-pub mod endpoint;
-pub mod flag;
 pub mod marker;
 pub mod stream;
-
-const MAX_PENDING_CONNECTIONS: usize = 100;
-const POLL_SLEEP_DUR: Duration = Duration::from_millis(50);
 
 #[derive(Component)]
 #[require(QuicServerMarker)]

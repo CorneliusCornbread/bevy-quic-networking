@@ -10,10 +10,7 @@ pub use s2n_quic::Server;
 pub use s2n_quic::client::Client;
 
 use crate::{
-    common::{
-        connection::plugin::ConnectionAttemptPlugin,
-        stream::{plugin::StreamAttemptPlugin, session::QuicSessionPacketPlugin},
-    },
+    common::{connection::plugin::ConnectionAttemptPlugin, stream::plugin::StreamAttemptPlugin},
     plugin::QuicAsyncPlugin,
     server::accepter::SimpleServerAccepterPlugin,
 };
@@ -26,7 +23,7 @@ impl PluginGroup for QuicDefaultPlugins {
             .add(QuicAsyncPlugin::default())
             .add(ConnectionAttemptPlugin)
             .add(StreamAttemptPlugin)
-            .add(QuicSessionPacketPlugin)
+            //.add(QuicAeronetPlugin) TODO: Change this to be a compile flag, including session components
             .add(SimpleServerAccepterPlugin)
     }
 }

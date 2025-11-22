@@ -1,7 +1,6 @@
 use std::{error::Error, sync::Arc};
 
 use bevy::{
-    ecs::{bundle::Bundle, component::Component},
     log::warn,
     prelude::{Deref, DerefMut},
 };

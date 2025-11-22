@@ -2,7 +2,7 @@ use bevy::{
     ecs::resource::Resource,
     prelude::{Deref, DerefMut},
 };
-use tokio::runtime::{Handle, Runtime};
+use tokio::runtime::Runtime;
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct TokioRuntime(pub(crate) Runtime);

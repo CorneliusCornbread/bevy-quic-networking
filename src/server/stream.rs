@@ -6,8 +6,11 @@ use s2n_quic::stream::{ReceiveStream, SendStream};
 use tokio::{runtime::Handle, task::JoinHandle};
 
 use crate::{
-    common::stream::{
-        QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
+    common::{
+        attempt::QuicActionError,
+        stream::{
+            QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
+        },
     },
     server::marker::QuicServerMarker,
 };
@@ -24,6 +27,10 @@ impl QuicServerBidirectionalStreamAttempt {
         >,
     ) -> Self {
         Self(QuicBidirectionalStreamAttempt::new(handle, conn_task))
+    }
+
+    pub fn get_output(&mut self) -> Result<(QuicReceiveStream, QuicSendStream), QuicActionError> {
+        self.0.get_output()
     }
 }
 

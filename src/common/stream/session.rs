@@ -7,8 +7,7 @@ use bevy::{
 use std::time::Instant;
 
 use crate::{
-    client::stream::QuicClientSendStream,
-    common::stream::{id::StreamId, receive::QuicReceiveStream},
+    client::stream::QuicClientSendStream, common::stream::id::StreamId,
     server::stream::QuicServerReceiveStream,
 };
 
@@ -20,13 +19,12 @@ const PACKET_WARN_THRESH: usize = 400;
 #[require(Session::new(Instant::now(), MIN_MTU))]
 pub struct QuicSession;
 
-pub struct QuicSessionPacketPlugin;
+pub struct QuicAeronetPlugin;
 
-impl Plugin for QuicSessionPacketPlugin {
+impl Plugin for QuicAeronetPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        // TODO: reenable this
-        //app.add_systems(PreUpdate, drain_recv_packets)
-        //    .add_systems(PreUpdate, drain_send_packets);
+        app.add_systems(PreUpdate, drain_recv_packets)
+            .add_systems(PreUpdate, drain_send_packets);
     }
 }
 
