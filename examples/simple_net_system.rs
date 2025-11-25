@@ -2,8 +2,9 @@ use std::{net::SocketAddr, path::Path};
 
 use bevy::{
     DefaultPlugins,
-    app::{App, PostUpdate, Startup},
+    app::{App, PostUpdate, Startup, Update},
     ecs::{
+        component::Component,
         entity::Entity,
         hierarchy::{ChildOf, Children},
         query::Without,
@@ -52,6 +53,7 @@ fn main() {
             PostUpdate,
             client_send.run_if(input_just_pressed(KeyCode::Space)),
         )
+        .add_systems(Update, add_debug)
         .run();
 }
 
@@ -81,27 +83,45 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
     });
 }
 
+#[derive(Component)]
+struct DebugCount(u64);
+
 fn client_open_stream(
     mut commands: Commands,
     connection_query: Query<(Entity, &mut QuicClientConnection), Without<Children>>,
 ) {
     for (entity, mut connection) in connection_query {
         let stream_bundle = connection.open_bidrectional_stream();
-        commands.spawn((stream_bundle, ChildOf(entity)));
+        commands.spawn((stream_bundle, DebugCount(0), ChildOf(entity)));
     }
 }
 
-fn client_send(client_streams: Query<&mut QuicClientSendStream>) {
-    for mut send_stream in client_streams {
+fn client_send(client_streams: Query<(&mut QuicClientSendStream, &mut DebugCount)>) {
+    for (mut send_stream, mut debug) in client_streams {
         let res = send_stream.send("Yippieee".into());
         if let Err(e) = res {
             error!("Error sending data: {}", e);
+            continue;
         }
+
+        debug.0 += 1;
+        let count = debug.0;
+
+        info!("Message send count: {}", count);
     }
 }
 
-fn debug_receive(receivers: Query<&mut QuicServerReceiveStream>) {
-    for mut stream in receivers {
+fn add_debug(
+    mut commands: Commands,
+    query: Query<(Entity, &QuicServerReceiveStream), Without<DebugCount>>,
+) {
+    for (entity, _stream) in &query {
+        commands.entity(entity).insert(DebugCount(0));
+    }
+}
+
+fn debug_receive(receivers: Query<(&mut QuicServerReceiveStream, &mut DebugCount)>) {
+    for (mut stream, mut debug) in receivers {
         if !stream.is_open() {
             error_once!("Stream closed");
         }
@@ -112,6 +132,10 @@ fn debug_receive(receivers: Query<&mut QuicServerReceiveStream>) {
             let bytes = data.payload;
             let string = String::from_utf8_lossy(&bytes);
             info!("Received message: '{}'", string);
+            debug.0 += 1;
+            let count = debug.0;
+
+            info!("Message rec count: {}", count);
         }
     }
 }

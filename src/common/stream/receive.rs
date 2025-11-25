@@ -1,13 +1,11 @@
 use aeronet::io::{bytes::Bytes, packet::RecvPacket};
-use bevy::{
-    ecs::component::Component,
-    log::{error, info, tracing::Instrument},
-};
+use bevy::log::{error, info, tracing::Instrument, warn};
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
 use std::error::Error;
 use tokio::{
     runtime::Handle,
+    select,
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
     time::Instant as TokioInstant,
@@ -90,53 +88,98 @@ async fn rec_task(
     let id = rec.id();
     info!("Opened receive stream from: {:?}, with ID: {}", addr, id);
 
-    //let mut command_buf = Vec::new();
-
     const BUFF_SIZE: usize = 100;
     let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
+    const READ_TIMEOUT_MS: u64 = 100;
+
+    // TODO: implement controls and LengthDelimitedCodec somewhere in this stack.
     'running: loop {
-        let mut break_flag = false;
+        select! {
+            biased;
 
-        /*         let command_count = control.recv_many(&mut command_buf, 100).await;
+            result = rec.receive_vectored(&mut read_buf) => {
+                match result {
+                    Ok((size, is_open)) => {
+                        let instant = TokioInstant::now();
 
-        for command in command_buf[..command_count].iter() {
-            match command {
-                RecControlMessage::StopSend(code) => {
-                    match rec.stop_sending(*code) {
-                        Ok(_) => info!("Send stream closed, exiting send stream task..."),
-                        Err(e) => {
-                            warn!(
-                                "Send stream errored when closing: {e}\n Exiting send stream task..."
-                            )
+                        for data in &mut read_buf[0..size] {
+                            let payload = std::mem::take(data);
+
+                            let packet = RecvPacket {
+                                recv_at: instant.into_std(),
+                                payload,
+                            };
+
+                            inbound_sender.try_send(packet).handle_err();
                         }
-                    }
-                    break_flag = true;
+
+                        if !is_open {
+                            info!("Closing send stream from: {:?}, with ID: {}", addr, id);
+                            break 'running;
+                        }
+                    },
+                    Err(e) => {
+                        match e {
+                            s2n_quic::stream::Error::ConnectionError { error , .. } => {
+                                error!("Receive stream connection error: {error}");
+                                receive_errors.try_send(Box::new(e)).handle_err();
+                                break 'running;
+                            }
+
+                            s2n_quic::stream::Error::InvalidStream { source, .. } => {
+                                error!("Invalid receive stream: {source}");
+                                receive_errors.try_send(Box::new(e)).handle_err();
+                                break 'running;
+                            }
+
+                            s2n_quic::stream::Error::StreamReset { error, source , .. } => {
+                                warn!("Stream reset: {error}, Source: {source}");
+                                receive_errors.try_send(Box::new(e)).handle_err();
+                            }
+
+                            _ => {
+                                error!("Error when reading from receive stream: {}", e);
+                                receive_errors.try_send(Box::new(e)).handle_err();
+                            },
+                        }
+                    },
                 }
             }
-        } */
 
-        match rec.receive().await {
-            Ok(data) => {
-                if let Some(packet) = data {
-                    let instant = TokioInstant::now();
+            _ = tokio::time::sleep(std::time::Duration::from_millis(READ_TIMEOUT_MS)) => {
+                // Do nothing
+            }
+        }
+
+        /* let poll_data = poll_fn(|cx| rec.poll_receive_vectored(&mut read_buf, cx)).await;
+
+        match poll_data {
+            Ok((size, is_open)) => {
+                let instant = TokioInstant::now();
+
+                for data in &mut read_buf[0..size] {
+                    let payload = std::mem::take(data);
 
                     let packet = RecvPacket {
                         recv_at: instant.into_std(),
-                        payload: packet.clone(),
+                        payload,
                     };
 
                     inbound_sender.try_send(packet).handle_err();
-                } else {
-                    info!("Closing receive stream from: {:?}, with ID: {}", addr, id);
-                    break_flag = true;
+                }
+
+                if !is_open {
+                    info!("Closing send stream from: {:?}, with ID: {}", addr, id);
+                    break 'running;
                 }
             }
             Err(e) => {
+                error!("Error when reading from receive stream: {}", e);
                 receive_errors.try_send(Box::new(e)).handle_err();
-                break_flag = true;
+                break 'running;
             }
-        }
+        } */
 
         /* let data_res = rec.receive_vectored(&mut read_buf).await;
         info!("rec vectored returned");
@@ -166,9 +209,5 @@ async fn rec_task(
                 receive_errors.try_send(Box::new(rec_err)).handle_err();
             }
         } */
-
-        if break_flag {
-            break 'running;
-        }
     }
 }
