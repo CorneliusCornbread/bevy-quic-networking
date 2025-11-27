@@ -2,9 +2,9 @@ use std::error::Error;
 use std::sync::Arc;
 use std::task::Poll;
 
-use aeronet::io::bytes::Bytes;
 use bevy::log::tracing::Instrument;
 use bevy::log::{error, info, warn};
+use bytes::Bytes;
 use s2n_quic::stream::SendStream;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::error::{SendError, TrySendError};

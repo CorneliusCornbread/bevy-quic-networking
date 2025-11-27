@@ -4,9 +4,10 @@ version = "0.16.0"
 edition = "2024"
 
 [dependencies]
-aeronet = "0.17.2"
+aeronet = { version = "0.17.2", optional = true }
 bevy = "0.17.3"
 bevy_transport = { path = "crates/bevy_transport" }
+bytes = "1.11.0"
 futures = "0.3.31"
 s2n-quic = "1.69.0"
 s2n-quic-tls = "0.69.0"
@@ -17,7 +18,7 @@ tokio = { version = "1.48.0", features = ["sync", "rt-multi-thread", "macros"] }
 bevy = { version = "0.17.3", features = ["bevy_remote"] }
 
 [features]
-default = ["performance-warns"]
+default = ["performance-warns", "aeronet"]
 
 ## Creates error components/entities when connections fail
 connection-errors = []
