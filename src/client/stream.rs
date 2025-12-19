@@ -1,4 +1,4 @@
-use aeronet::io::SessionEndpoint;
+use aeronet_io::SessionEndpoint;
 use bevy::{
     ecs::component::Component,
     prelude::{Deref, DerefMut},

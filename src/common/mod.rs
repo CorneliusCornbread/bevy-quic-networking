@@ -1,4 +1,4 @@
-use aeronet::io::packet::RecvPacket;
+use aeronet_io::packet::RecvPacket;
 use bevy::{
     ecs::{entity::Entity, system::EntityCommands},
     log::{error, warn},

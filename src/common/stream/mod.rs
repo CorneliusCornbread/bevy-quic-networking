@@ -6,7 +6,7 @@ use crate::common::{
     stream::{receive::QuicReceiveStream, send::QuicSendStream},
 };
 
-pub mod codec;
+// pub mod codec;
 pub mod id;
 pub mod plugin;
 pub mod receive;

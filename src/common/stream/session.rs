@@ -1,4 +1,4 @@
-use aeronet::io::Session;
+use aeronet_io::Session;
 use bevy::{
     app::{Plugin, PreUpdate},
     ecs::{component::Component, query::With, system::Query},

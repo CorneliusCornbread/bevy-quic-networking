@@ -1,4 +1,4 @@
-use aeronet::io::{bytes::Bytes, packet::RecvPacket};
+use aeronet_io::{bytes::Bytes, packet::RecvPacket};
 use bevy::log::{error, info, tracing::Instrument, warn};
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
@@ -93,7 +93,7 @@ async fn rec_task(
 
     const READ_TIMEOUT_MS: u64 = 100;
 
-    // TODO: implement controls and LengthDelimitedCodec somewhere in this stack.
+    // TODO: implement controls
     'running: loop {
         select! {
             biased;

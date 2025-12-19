@@ -1,3 +1,5 @@
+// Custom aeronet transport layer implementation for fragment handling
+
 use std::sync::mpsc::Sender;
 
 use aeronet::io::packet::RecvPacket;
@@ -6,7 +8,6 @@ use bytes::Buf;
 use bytes::BufMut;
 use bytes::Bytes;
 
-use bytes::BytesMut;
 use s2n_quic::stream::ReceiveStream;
 
 const HEADER_LEN: usize = size_of::<u32>();
