@@ -20,10 +20,13 @@ pub struct QuicSendStream {
     outbound_data: Sender<Bytes>,
     outbound_control: Sender<SendControlMessage>,
     send_errors: Receiver<Box<dyn Error + Send + Sync>>,
+    stream_id: u64,
 }
 
 impl QuicSendStream {
     pub fn new(runtime: Handle, send: SendStream) -> Self {
+        let stream_id = send.id();
+
         let (send_error_sender, send_errors) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (outbound_control, outbound_control_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (outbound_data, outbound_data_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
@@ -44,6 +47,7 @@ impl QuicSendStream {
             outbound_data,
             outbound_control,
             send_errors,
+            stream_id,
         }
     }
 
@@ -91,16 +95,12 @@ impl QuicSendStream {
     }
 
     pub fn log_outstanding_errors(&mut self) {
-        let waker = Arc::new(futures::task::noop_waker_ref());
-        let mut cx = std::task::Context::from_waker(&waker);
-        let mut buf = vec![];
+        while !self.send_errors.is_empty() {
+            let Some(err) = self.send_errors.blocking_recv() else {
+                continue;
+            };
 
-        let poll = self.send_errors.poll_recv_many(&mut cx, &mut buf, 100);
-
-        if let Poll::Ready(count) = poll {
-            for err in &mut buf[..count] {
-                error!("Send task error: {}", err);
-            }
+            error!("Sender ID: {}, encountered error:\n{}", self.stream_id, err);
         }
     }
 }

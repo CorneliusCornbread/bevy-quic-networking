@@ -13,7 +13,15 @@ use tokio::{
 
 use crate::common::HandleChannelError;
 
+/// How many messages can sit between async and bevy before being dropped
 const CHANNEL_BUFF_SIZE: usize = 256;
+
+/// How long we wait for each receive read before moving on to command checks
+const READ_TIMEOUT_MS: u64 = 50;
+/// How big the receive buffer of Bytes chunks we can receive at once is
+const BUFF_SIZE: usize = 100;
+/// How many commands do we read each loop
+const MAX_COMMAND_COUNT: usize = 10;
 
 pub struct QuicReceiveStream {
     rec_task: JoinHandle<()>,
@@ -76,32 +84,27 @@ impl QuicReceiveStream {
         };
 
         info!(
-            "Stop_send() called on closed connection with ID: {}.",
+            "Stop_send() called on stopped connection with ID: {}.",
             self.stream_id
         );
     }
 
-    pub fn print_rec_errors(&mut self) {
+    pub fn log_outstanding_errors(&mut self) {
         while !self.receive_errors.is_empty() {
-            let opt = self.receive_errors.blocking_recv();
+            let Some(err) = self.receive_errors.blocking_recv() else {
+                continue;
+            };
 
-            if let Some(err) = opt {
-                error!("Receiver error: {}", err);
-            }
+            error!(
+                "Receiver ID: {}, encountered error:\n{}",
+                self.stream_id, err
+            );
         }
     }
 }
 
-const DEFAULT_SEND_ERR: ErrorCode = ErrorCode::UNKNOWN;
-
 enum RecControlMessage {
     StopSend(ErrorCode),
-}
-
-impl Default for RecControlMessage {
-    fn default() -> Self {
-        Self::StopSend(DEFAULT_SEND_ERR)
-    }
 }
 
 async fn rec_task(
@@ -110,10 +113,6 @@ async fn rec_task(
     inbound_sender: Sender<RecvPacket>,
     receive_errors: Sender<Box<dyn Error + Send + Sync>>,
 ) {
-    const READ_TIMEOUT_MS: u64 = 50; // How long we wait for each receive read before moving on to command checks
-    const BUFF_SIZE: usize = 100; // How big the receive buffer of Bytes chunks we can receive at once is
-    const MAX_COMMAND_COUNT: usize = 10; // How many commands do we read each loop
-
     let addr = rec.connection().remote_addr();
     let id = rec.id();
     info!("Opened receive stream from: {:?}, with ID: {}", addr, id);
@@ -163,6 +162,7 @@ async fn rec_task(
                             s2n_quic::stream::Error::StreamReset { error, source , .. } => {
                                 warn!("Stream reset: {error}, Source: {source}");
                                 receive_errors.try_send(Box::new(e)).handle_err();
+                                break 'running;
                             }
 
                             _ => {
