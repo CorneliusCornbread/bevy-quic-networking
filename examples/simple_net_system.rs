@@ -22,7 +22,11 @@ use bevy::{
 };
 use bevy_quic_networking::{
     QuicDefaultPlugins,
-    client::{QuicClient, connection::QuicClientConnection, stream::QuicClientSendStream},
+    client::{
+        QuicClient,
+        connection::QuicClientConnection,
+        stream::{QuicClientReceiveStream, QuicClientSendStream},
+    },
     common::connection::runtime::TokioRuntime,
     server::{
         QuicServer,
@@ -50,8 +54,7 @@ fn main() {
         .add_plugins(RemotePlugin::default())
         .add_plugins(RemoteHttpPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(PostUpdate, client_open_stream)
-        .add_systems(PostUpdate, (debug_receive, debug_send))
+        .add_systems(PostUpdate, (client_open_stream, debug_receive, debug_send))
         .add_systems(
             PostUpdate,
             client_send.run_if(input_just_pressed(KeyCode::Space)),
@@ -104,17 +107,16 @@ fn client_open_stream(
 }
 
 fn client_send(client_streams: Query<(&mut QuicClientSendStream, &mut DebugCount)>) {
-    for (mut send_stream, mut debug) in client_streams {
+    for (mut send_stream, mut debug_count) in client_streams {
         let res = send_stream.send("Yippieee".into());
         if let Err(e) = res {
             error!("Error sending data: {}", e);
             continue;
         }
 
-        debug.0 += 1;
-        let count = debug.0;
+        debug_count.0 += 1;
 
-        info!("Message send count: {}", count);
+        info!("Message send count: {}", debug_count.0);
     }
 }
 
@@ -127,8 +129,11 @@ fn add_debug(
     }
 }
 
-fn debug_receive(receivers: Query<(&mut QuicServerReceiveStream, &mut DebugCount)>) {
-    for (mut stream, mut debug) in receivers {
+fn debug_receive(
+    server_receivers: Query<(&mut QuicServerReceiveStream, &mut DebugCount)>,
+    client_receivers: Query<&mut QuicClientReceiveStream>,
+) {
+    for (mut stream, mut debug) in server_receivers {
         stream.log_outstanding_errors();
 
         if !stream.is_open() {
@@ -145,16 +150,27 @@ fn debug_receive(receivers: Query<(&mut QuicServerReceiveStream, &mut DebugCount
             info!("Message rec count: {}", count);
         }
     }
+
+    for mut stream in client_receivers {
+        stream.log_outstanding_errors();
+    }
+}
+
+fn debug_send(
+    server_receivers: Query<&mut QuicServerSendStream>,
+    client_receivers: Query<&mut QuicClientSendStream>,
+) {
+    for mut stream in server_receivers {
+        stream.log_outstanding_errors();
+    }
+
+    for mut stream in client_receivers {
+        stream.log_outstanding_errors();
+    }
 }
 
 fn stop_receive(receivers: Query<&mut QuicServerReceiveStream>) {
     for mut stream in receivers {
         stream.stop_send(0u8.into());
-    }
-}
-
-fn debug_send(receivers: Query<&mut QuicServerSendStream>) {
-    for mut stream in receivers {
-        stream.log_outstanding_errors();
     }
 }

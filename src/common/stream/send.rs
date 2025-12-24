@@ -1,6 +1,4 @@
 use std::error::Error;
-use std::sync::Arc;
-use std::task::Poll;
 
 use bevy::log::tracing::Instrument;
 use bevy::log::{error, info, warn};
@@ -105,6 +103,7 @@ impl QuicSendStream {
     }
 }
 
+// TODO: this whole function needs to be massively reworked
 async fn outbound_send_task(
     mut send: SendStream,
     mut control: Receiver<SendControlMessage>,
@@ -191,6 +190,16 @@ async fn send_data(
         let err_opt = send.send(data).await.err();
 
         if let Some(err) = err_opt {
+            match &err {
+                s2n_quic::stream::Error::InvalidStream { source: _, .. }
+                | s2n_quic::stream::Error::SendAfterFinish { source: _, .. } => {}
+                s2n_quic::stream::Error::StreamReset {
+                    error, source: _, ..
+                } => todo!(),
+
+                _ => todo!(),
+            }
+
             send_errors.try_send(Box::new(err)).handle_err();
         }
     }

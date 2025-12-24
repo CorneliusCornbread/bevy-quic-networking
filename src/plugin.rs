@@ -9,8 +9,6 @@ pub struct QuicAsyncPlugin {
 impl Plugin for QuicAsyncPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<TokioRuntime>();
-
-        //app.add_systems(Update, drain_messages);
     }
 }
 
