@@ -5,13 +5,16 @@ use bevy::log::{error, info, warn};
 use bytes::Bytes;
 use s2n_quic::stream::SendStream;
 use tokio::runtime::Handle;
+use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 
 use crate::common::HandleChannelError;
 
-const CHANNEL_BUFF_SIZE: usize = 256;
+const DEBUG_CHANNEL_SIZE: usize = 256;
+const CONTROL_CHANNEL_SIZE: usize = 256;
+const OUTBOUND_CHANNEL_SIZE: usize = 1024;
 
 pub struct QuicSendStream {
     send_task: JoinHandle<()>,
@@ -25,9 +28,9 @@ impl QuicSendStream {
     pub fn new(runtime: Handle, send: SendStream) -> Self {
         let stream_id = send.id();
 
-        let (send_error_sender, send_errors) = mpsc::channel(CHANNEL_BUFF_SIZE);
-        let (outbound_control, outbound_control_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
-        let (outbound_data, outbound_data_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
+        let (send_error_sender, send_errors) = mpsc::channel(DEBUG_CHANNEL_SIZE);
+        let (outbound_control, outbound_control_receiver) = mpsc::channel(CONTROL_CHANNEL_SIZE);
+        let (outbound_data, outbound_data_receiver) = mpsc::channel(OUTBOUND_CHANNEL_SIZE);
 
         let span = bevy::log::info_span!("quic_send_task");
         let send_task = runtime.spawn(
@@ -55,6 +58,15 @@ impl QuicSendStream {
     pub fn close(&mut self) -> Option<()> {
         self.outbound_control
             .blocking_send(SendControlMessage::CloseAndQuit)
+            .ok()
+    }
+
+    /// Returns `Some(())` in the event the flush event was successful, if it wasn't
+    /// it's due to the Receiver of the message being dropped. In which case
+    /// it's likely the async task has been shut down, already quit, or crashed.
+    pub fn flush(&mut self) -> Option<()> {
+        self.outbound_control
+            .blocking_send(SendControlMessage::Flush)
             .ok()
     }
 
@@ -103,7 +115,6 @@ impl QuicSendStream {
     }
 }
 
-// TODO: this whole function needs to be massively reworked
 async fn outbound_send_task(
     mut send: SendStream,
     mut control: Receiver<SendControlMessage>,
@@ -114,94 +125,109 @@ async fn outbound_send_task(
     let id = send.id();
     info!("Opened send stream from: {:?}, with ID: {}", addr, id);
 
-    //let mut command_buf = Vec::new();
+    let mut send_buf = Vec::with_capacity(OUTBOUND_CHANNEL_SIZE);
 
     'running: loop {
         let mut break_flag = false;
 
-        /* let command_count = control.recv_many(&mut command_buf, 100).await;
+        select! {
+            count = outbound_receiver.recv_many(&mut send_buf, OUTBOUND_CHANNEL_SIZE) => {
+                // channel closed
+                if count == 0 {
+                    warn!(
+                        "Outbound send channel is closed. Closing send stream from: {:?}, with ID: {}",
+                        addr, id
+                    );
 
-               for i in 0..command_count {
-                   let command_opt = command_buf.get(i);
+                    break_flag = true;
+                }
 
-                   if command_opt.is_none() {
-                       // in theory this should never happen
-                       break;
-                   }
+                let err_opt = send.send_vectored(&mut send_buf[..count]).await;
+                send_buf.clear();
 
-                   match command_opt.unwrap() {
-                       SendControlMessage::CloseAndQuit => {
-                           match send.close().await {
-                               Ok(_) => info!("Send stream closed, exiting send stream task..."),
-                               Err(e) => {
-                                   warn!(
-                                       "Send stream errored when closing: {e}\n Exiting send stream task..."
-                                   )
-                               }
-                           }
-                           break_flag = true;
-                       }
-                       SendControlMessage::Flush => {
-                           let res = send.flush().await;
-                           if let Err(e) = res {
-                               send_errors.try_send(Box::new(e)).handle_err();
-                           }
-                       }
-                   }
-               }
-        */
-        // If we're quitting send all the ready to send messages we have in the buffer.
-        // If there are more they get dropped.
+                if let Err(err) = err_opt {
+                    match &err {
+                        s2n_quic::stream::Error::InvalidStream { source, .. }
+                        | s2n_quic::stream::Error::SendAfterFinish { source, .. } => {
+                            error!(
+                                "Send stream from: {:?}, ID: {}, is in an invalid state:\n{}",
+                                addr, id, source
+                            );
+                        }
+                        s2n_quic::stream::Error::StreamReset {
+                            error, source: _, ..
+                        } => {
+                            error!(
+                                "Send stream from: {:?}, ID: {}, has encountered a stream reset:\n{}",
+                                addr, id, error
+                            );
+                            break_flag = true;
+                        }
+
+                        _ => {}
+                    }
+
+                    send_errors.try_send(Box::new(err)).handle_err();
+                }
+            }
+
+            cmd_opt = control.recv() => {
+                if let Some(cmd) = cmd_opt {
+                    match cmd {
+                        SendControlMessage::CloseAndQuit => {
+                            let res = send.close().await;
+
+                            if let Err(e) = res {
+                                error!(
+                                    "Send stream from: {:?}, ID: {}, errored when closing stream:\n{}",
+                                    addr, id, e
+                                );
+
+                                send_errors.try_send(Box::new(e)).handle_err();
+                            }
+                        }
+                        SendControlMessage::Flush => {
+                            let res = send.flush().await;
+
+                            if let Err(e) = res {
+                                error!(
+                                    "Send stream from: {:?}, ID: {}, errored when flushing stream:\n{}",
+                                    addr, id, e
+                                );
+
+                                send_errors.try_send(Box::new(e)).handle_err();
+                            }
+                        }
+                    }
+                }
+                else {
+                    // Control channel has been dropped
+                    info!(
+                        "Control channel for send stream ID: {} has been dropped. Quitting...",
+                        id
+                    );
+                    break_flag = true;
+                };
+            }
+        }
+
         if break_flag {
-            let message_count = outbound_receiver.len();
-            info!("Closing send stream from: {:?}, with ID: {}", addr, id);
-
-            for _i in 0..message_count {
-                send_data(&mut send, &mut outbound_receiver, &send_errors).await;
-            }
-
-            info!(
-                "Send stream from: {:?}, with ID: {}, has been closed",
-                addr, id
-            );
-
-            let dropped_count = outbound_receiver.len();
-
-            if dropped_count > 0 {
-                warn!(
-                    "Send stream ID: {} dropped {} messages, this will result in loss of data being sent",
-                    id, dropped_count
-                )
-            }
-
             break 'running;
         }
-
-        send_data(&mut send, &mut outbound_receiver, &send_errors).await;
     }
-}
 
-async fn send_data(
-    send: &mut SendStream,
-    outbound_receiver: &mut Receiver<Bytes>,
-    send_errors: &Sender<Box<dyn Error + Send + Sync + 'static>>,
-) {
-    if let Some(data) = outbound_receiver.recv().await {
-        let err_opt = send.send(data).await.err();
+    info!(
+        "Send stream from: {:?}, with ID: {}, has been closed",
+        addr, id
+    );
 
-        if let Some(err) = err_opt {
-            match &err {
-                s2n_quic::stream::Error::InvalidStream { source: _, .. }
-                | s2n_quic::stream::Error::SendAfterFinish { source: _, .. } => {}
-                s2n_quic::stream::Error::StreamReset {
-                    error, source: _, ..
-                } => todo!(),
+    let dropped_count = outbound_receiver.len();
 
-                _ => todo!(),
-            }
-
-            send_errors.try_send(Box::new(err)).handle_err();
-        }
+    if dropped_count > 0 {
+        warn!(
+            "Send stream ID: {} dropped {} messages, this will result in loss of data being sent",
+            id, dropped_count
+        )
     }
 }
 

@@ -63,6 +63,10 @@ fn main() {
             PostUpdate,
             stop_receive.run_if(input_just_pressed(KeyCode::Digit0)),
         )
+        .add_systems(
+            PostUpdate,
+            close_send.run_if(input_just_pressed(KeyCode::Digit9)),
+        )
         .add_systems(Update, add_debug)
         .run();
 }
@@ -172,5 +176,11 @@ fn debug_send(
 fn stop_receive(receivers: Query<&mut QuicServerReceiveStream>) {
     for mut stream in receivers {
         stream.stop_send(0u8.into());
+    }
+}
+
+fn close_send(senders: Query<&mut QuicClientSendStream>) {
+    for mut stream in senders {
+        stream.close();
     }
 }

@@ -83,7 +83,7 @@ impl QuicReceiveStream {
             return;
         };
 
-        info!(
+        warn!(
             "Stop_send() called on stopped connection with ID: {}.",
             self.stream_id
         );
@@ -119,8 +119,9 @@ async fn rec_task(
 
     let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
-    // TODO: implement controls
     'running: loop {
+        let mut break_flag = false;
+
         select! {
             biased;
 
@@ -137,7 +138,17 @@ async fn rec_task(
                                 payload,
                             };
 
-                            inbound_sender.try_send(packet).handle_err();
+                            if let Err(inbound_err) = inbound_sender.try_send(packet) {
+                                match inbound_err {
+                                    mpsc::error::TrySendError::Full(_) => {
+                                        error!("The inbound receive channel from: {:?}, with ID: {}, is full. The message received will be dropped.", addr, id);
+                                    },
+                                    mpsc::error::TrySendError::Closed(_) => {
+                                        warn!("The inbound receive channel from: {:?}, with ID: {}, is closed. The message received will be dropped and the stream will be closed.", addr, id);
+                                        break_flag = true;
+                                    },
+                                }
+                            }
                         }
 
                         if !is_open {
@@ -179,14 +190,15 @@ async fn rec_task(
             }
         }
 
+        // TODO: move this to select!
         'cmd_loop: for _i in 0..MAX_COMMAND_COUNT {
             if control.is_empty() {
                 continue 'running;
             }
 
             let Some(cmd) = control.recv().await else {
-                warn!(
-                    "Receive control panel is closed. Closing receive stream from: {:?}, with ID: {}",
+                info!(
+                    "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
                     addr, id
                 );
                 break 'running;
@@ -203,5 +215,14 @@ async fn rec_task(
                 }
             }
         }
+
+        if break_flag {
+            break 'running;
+        }
     }
+
+    info!(
+        "Receive stream from: {:?}, with ID: {}, has been closed",
+        addr, id
+    );
 }

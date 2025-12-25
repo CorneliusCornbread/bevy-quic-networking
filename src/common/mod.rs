@@ -34,7 +34,7 @@ impl<T> HandleChannelError for Result<(), TrySendError<T>> {
     fn handle_err(&self) {
         if let Err(send_err) = self {
             error!(
-                "Error buffer for async task is full, the following error will be dropped: {send_err}"
+                "Error buffer for async task is full or closed, the following error will be dropped: {send_err}"
             );
         }
     }
