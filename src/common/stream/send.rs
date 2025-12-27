@@ -185,6 +185,8 @@ async fn outbound_send_task(
 
                                 send_errors.try_send(Box::new(e)).handle_err();
                             }
+
+                            break_flag = true;
                         }
                         SendControlMessage::Flush => {
                             let res = send.flush().await;
