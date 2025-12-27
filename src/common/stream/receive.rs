@@ -14,14 +14,10 @@ use tokio::{
 use crate::common::HandleChannelError;
 
 /// How many messages can sit between async and bevy before being dropped
-const CHANNEL_BUFF_SIZE: usize = 256;
+const CHANNEL_BUFF_SIZE: usize = 128;
 
-/// How long we wait for each receive read before moving on to command checks
-const READ_TIMEOUT_MS: u64 = 50;
 /// How big the receive buffer of Bytes chunks we can receive at once is
-const BUFF_SIZE: usize = 100;
-/// How many commands do we read each loop
-const MAX_COMMAND_COUNT: usize = 10;
+const BUFF_SIZE: usize = 64;
 
 pub struct QuicReceiveStream {
     rec_task: JoinHandle<()>,
@@ -107,6 +103,7 @@ enum RecControlMessage {
     StopSend(ErrorCode),
 }
 
+// TODO: refactor this into a structure
 async fn rec_task(
     mut rec: ReceiveStream,
     mut control: Receiver<RecControlMessage>,
@@ -152,72 +149,90 @@ async fn rec_task(
                         }
 
                         if !is_open {
-                            info!("Closing receive stream from: {:?}, with ID: {}", addr, id);
-                            break 'running;
+                            break_flag = true;
                         }
                     },
                     Err(e) => {
                         match e {
                             s2n_quic::stream::Error::ConnectionError { error , .. } => {
                                 error!("Receive stream connection error: {error}");
-                                receive_errors.try_send(Box::new(e)).handle_err();
-                                break 'running;
+                                break_flag = true;
                             }
 
                             s2n_quic::stream::Error::InvalidStream { source, .. } => {
                                 error!("Invalid receive stream: {source}");
-                                receive_errors.try_send(Box::new(e)).handle_err();
-                                break 'running;
+                                break_flag = true;
+
                             }
 
                             s2n_quic::stream::Error::StreamReset { error, source , .. } => {
-                                warn!("Stream reset: {error}, Source: {source}");
-                                receive_errors.try_send(Box::new(e)).handle_err();
-                                break 'running;
+                                error!("Receive stream reset: {error}, Source: {source}");
+                                break_flag = true;
                             }
 
                             _ => {
                                 error!("Error when reading from receive stream: {}", e);
-                                receive_errors.try_send(Box::new(e)).handle_err();
                             },
                         }
+
+                        receive_errors.try_send(Box::new(e)).handle_err();
                     },
                 }
             }
 
-            _ = tokio::time::sleep(std::time::Duration::from_millis(READ_TIMEOUT_MS)) => {
-                // Do nothing
-            }
-        }
+            cmd_opt = control.recv() => {
+                if let Some(cmd) = cmd_opt {
+                    match cmd {
+                        RecControlMessage::StopSend(error_code) => {
+                            break_flag = true;
 
-        // TODO: move this to select!
-        'cmd_loop: for _i in 0..MAX_COMMAND_COUNT {
-            if control.is_empty() {
-                continue 'running;
-            }
-
-            let Some(cmd) = control.recv().await else {
-                info!(
-                    "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
-                    addr, id
-                );
-                break 'running;
-            };
-
-            match cmd {
-                RecControlMessage::StopSend(error_code) => {
-                    let Err(stream_err) = rec.stop_sending(error_code) else {
-                        continue 'cmd_loop;
-                    };
-
-                    warn!("Stream error on receive stop_send() exiting:\n{stream_err}");
-                    break 'running;
+                            if let Err(stream_err) = rec.stop_sending(error_code) {
+                                warn!("Stream error on receive stop_send():\n{stream_err}");
+                            }
+                        }
+                    }
                 }
+                else {
+                    info!(
+                        "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
+                        addr, id
+                    );
+                    break_flag = true;
+                };
             }
         }
 
         if break_flag {
             break 'running;
+        }
+    }
+
+    let _send_res = rec.stop_sending(ErrorCode::UNKNOWN);
+
+    let instant = TokioInstant::now();
+
+    // Empty out receiver
+    while let Ok(Some(payload)) = rec.receive().await {
+        let packet = RecvPacket {
+            recv_at: instant.into_std(),
+            payload,
+        };
+
+        if let Err(inbound_err) = inbound_sender.try_send(packet) {
+            match inbound_err {
+                mpsc::error::TrySendError::Full(_) => {
+                    error!(
+                        "The inbound receive channel from: {:?}, with ID: {}, is full. The message received will be dropped.",
+                        addr, id
+                    );
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    warn!(
+                        "The inbound receive channel from: {:?}, with ID: {}, is closed. The message received will be dropped and the stream will be closed.",
+                        addr, id
+                    );
+                }
+            }
         }
     }
 

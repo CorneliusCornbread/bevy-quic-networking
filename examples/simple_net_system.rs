@@ -12,7 +12,7 @@ use bevy::{
         system::{Commands, Query, Res},
     },
     input::{common_conditions::input_just_pressed, keyboard::KeyCode},
-    log::{error, error_once, info},
+    log::{error, info},
     prelude::PluginGroup,
     remote::{RemotePlugin, http::RemoteHttpPlugin},
     render::{
