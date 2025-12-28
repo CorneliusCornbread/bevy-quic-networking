@@ -11,6 +11,8 @@ use tokio::{
     time::Instant as TokioInstant,
 };
 
+type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
+
 use crate::common::HandleChannelError;
 
 /// How many messages can sit between async and bevy before being dropped
@@ -30,21 +32,24 @@ pub struct QuicReceiveStream {
 impl QuicReceiveStream {
     pub fn new(runtime: Handle, rec: ReceiveStream) -> Self {
         let stream_id = rec.id();
+        let addr = rec.connection().remote_addr();
 
         let (inbound_control, inbound_control_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (inbound_data_sender, inbound_data) = mpsc::channel(CHANNEL_BUFF_SIZE);
         let (receive_error_sender, receive_errors) = mpsc::channel(CHANNEL_BUFF_SIZE);
 
+        let task = RecTask {
+            rec,
+            control: inbound_control_receiver,
+            inbound_sender: inbound_data_sender,
+            receive_errors: receive_error_sender,
+            break_flag: false,
+            addr,
+            id: stream_id,
+        };
+
         let span = bevy::log::info_span!("quic_rec_task");
-        let rec_task = runtime.spawn(
-            rec_task(
-                rec,
-                inbound_control_receiver,
-                inbound_data_sender,
-                receive_error_sender,
-            )
-            .instrument(span),
-        );
+        let rec_task = runtime.spawn(task.start().instrument(span));
 
         Self {
             rec_task,
@@ -103,141 +108,148 @@ enum RecControlMessage {
     StopSend(ErrorCode),
 }
 
-// TODO: refactor this into a structure
-async fn rec_task(
-    mut rec: ReceiveStream,
-    mut control: Receiver<RecControlMessage>,
-    inbound_sender: Sender<RecvPacket>,
-    receive_errors: Sender<Box<dyn Error + Send + Sync>>,
-) {
-    let addr = rec.connection().remote_addr();
-    let id = rec.id();
-    info!("Opened receive stream from: {:?}, with ID: {}", addr, id);
+struct RecTask {
+    pub(crate) rec: ReceiveStream,
+    pub(crate) control: Receiver<RecControlMessage>,
+    pub(crate) inbound_sender: Sender<RecvPacket>,
+    pub(crate) receive_errors: Sender<Box<dyn Error + Send + Sync>>,
+    pub(crate) break_flag: bool,
+    pub(crate) addr: AddrResult,
+    pub(crate) id: u64,
+}
 
-    let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
+impl RecTask {
+    async fn start(mut self) {
+        let addr = self.rec.connection().remote_addr();
+        let id = self.rec.id();
+        info!("Opened receive stream from: {:?}, with ID: {}", addr, id);
 
-    'running: loop {
-        let mut break_flag = false;
+        let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
-        select! {
-            biased;
+        'running: loop {
+            select! {
+                biased;
 
-            result = rec.receive_vectored(&mut read_buf) => {
-                match result {
-                    Ok((size, is_open)) => {
-                        let instant = TokioInstant::now();
+                result = self.rec.receive_vectored(&mut read_buf) => {
+                    self.handle_receive_result(&mut read_buf, result);
+                }
 
-                        for data in &mut read_buf[0..size] {
-                            let payload = std::mem::take(data);
+                cmd_opt = self.control.recv() => {
+                    if let Some(cmd) = cmd_opt {
+                        match cmd {
+                            RecControlMessage::StopSend(error_code) => {
+                                self.break_flag = true;
 
-                            let packet = RecvPacket {
-                                recv_at: instant.into_std(),
-                                payload,
-                            };
-
-                            if let Err(inbound_err) = inbound_sender.try_send(packet) {
-                                match inbound_err {
-                                    mpsc::error::TrySendError::Full(_) => {
-                                        error!("The inbound receive channel from: {:?}, with ID: {}, is full. The message received will be dropped.", addr, id);
-                                    },
-                                    mpsc::error::TrySendError::Closed(_) => {
-                                        warn!("The inbound receive channel from: {:?}, with ID: {}, is closed. The message received will be dropped and the stream will be closed.", addr, id);
-                                        break_flag = true;
-                                    },
+                                if let Err(stream_err) = self.rec.stop_sending(error_code) {
+                                    warn!("Stream error on receive stop_send():\n{stream_err}");
                                 }
                             }
                         }
-
-                        if !is_open {
-                            break_flag = true;
-                        }
-                    },
-                    Err(e) => {
-                        match e {
-                            s2n_quic::stream::Error::ConnectionError { error , .. } => {
-                                error!("Receive stream connection error: {error}");
-                                break_flag = true;
-                            }
-
-                            s2n_quic::stream::Error::InvalidStream { source, .. } => {
-                                error!("Invalid receive stream: {source}");
-                                break_flag = true;
-
-                            }
-
-                            s2n_quic::stream::Error::StreamReset { error, source , .. } => {
-                                error!("Receive stream reset: {error}, Source: {source}");
-                                break_flag = true;
-                            }
-
-                            _ => {
-                                error!("Error when reading from receive stream: {}", e);
-                            },
-                        }
-
-                        receive_errors.try_send(Box::new(e)).handle_err();
-                    },
+                    }
+                    else {
+                        info!(
+                            "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
+                            addr, id
+                        );
+                        self.break_flag = true;
+                    };
                 }
             }
 
-            cmd_opt = control.recv() => {
-                if let Some(cmd) = cmd_opt {
-                    match cmd {
-                        RecControlMessage::StopSend(error_code) => {
-                            break_flag = true;
+            if self.break_flag {
+                break 'running;
+            }
+        }
 
-                            if let Err(stream_err) = rec.stop_sending(error_code) {
-                                warn!("Stream error on receive stop_send():\n{stream_err}");
-                            }
-                        }
+        let _send_res = self.rec.stop_sending(ErrorCode::UNKNOWN);
+        let instant = TokioInstant::now();
+
+        // Empty out receiver
+        while let Ok(Some(payload)) = self.rec.receive().await {
+            let packet = RecvPacket {
+                recv_at: instant.into_std(),
+                payload,
+            };
+
+            self.transfer_payload_data(packet);
+        }
+
+        info!(
+            "Receive stream from: {:?}, with ID: {}, has been closed",
+            addr, id
+        );
+    }
+
+    fn handle_receive_result(
+        &mut self,
+        read_buf: &mut [Bytes; BUFF_SIZE],
+        result: Result<(usize, bool), s2n_quic::stream::Error>,
+    ) {
+        match result {
+            Ok((size, is_open)) => {
+                let instant = TokioInstant::now();
+
+                for data in &mut read_buf[..size] {
+                    let payload = std::mem::take(data);
+
+                    let packet = RecvPacket {
+                        recv_at: instant.into_std(),
+                        payload,
+                    };
+
+                    self.transfer_payload_data(packet);
+                }
+
+                if !is_open {
+                    self.break_flag = true;
+                }
+            }
+            Err(e) => {
+                match e {
+                    s2n_quic::stream::Error::ConnectionError { error, .. } => {
+                        error!("Receive stream connection error: {error}");
+                        self.break_flag = true;
+                    }
+
+                    s2n_quic::stream::Error::InvalidStream { source, .. } => {
+                        error!("Invalid receive stream: {source}");
+                        self.break_flag = true;
+                    }
+
+                    s2n_quic::stream::Error::StreamReset { error, source, .. } => {
+                        error!("Receive stream reset: {error}, Source: {source}");
+                        self.break_flag = true;
+                    }
+
+                    _ => {
+                        error!("Error when reading from receive stream: {}", e);
                     }
                 }
-                else {
-                    info!(
-                        "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
-                        addr, id
-                    );
-                    break_flag = true;
-                };
-            }
-        }
 
-        if break_flag {
-            break 'running;
+                self.receive_errors.try_send(Box::new(e)).handle_err();
+            }
         }
     }
 
-    let _send_res = rec.stop_sending(ErrorCode::UNKNOWN);
-
-    let instant = TokioInstant::now();
-
-    // Empty out receiver
-    while let Ok(Some(payload)) = rec.receive().await {
-        let packet = RecvPacket {
-            recv_at: instant.into_std(),
-            payload,
+    fn transfer_payload_data(&mut self, packet: RecvPacket) {
+        let Err(inbound_err) = self.inbound_sender.try_send(packet) else {
+            return;
         };
 
-        if let Err(inbound_err) = inbound_sender.try_send(packet) {
-            match inbound_err {
-                mpsc::error::TrySendError::Full(_) => {
-                    error!(
-                        "The inbound receive channel from: {:?}, with ID: {}, is full. The message received will be dropped.",
-                        addr, id
-                    );
-                }
-                mpsc::error::TrySendError::Closed(_) => {
-                    warn!(
-                        "The inbound receive channel from: {:?}, with ID: {}, is closed. The message received will be dropped and the stream will be closed.",
-                        addr, id
-                    );
-                }
+        match inbound_err {
+            mpsc::error::TrySendError::Full(_) => {
+                error!(
+                    "The inbound receive channel from: {:?}, with ID: {}, is full. The message received will be dropped.",
+                    self.addr, self.id
+                );
+            }
+            mpsc::error::TrySendError::Closed(_) => {
+                warn!(
+                    "The inbound receive channel from: {:?}, with ID: {}, is closed. The message received will be dropped and the stream will be closed.",
+                    self.addr, self.id
+                );
+                self.break_flag = true;
             }
         }
     }
-
-    info!(
-        "Receive stream from: {:?}, with ID: {}, has been closed",
-        addr, id
-    );
 }
