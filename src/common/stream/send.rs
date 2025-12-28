@@ -1,9 +1,8 @@
-use std::error::Error;
-
 use bevy::log::tracing::Instrument;
 use bevy::log::{error, info, warn};
 use bytes::Bytes;
 use s2n_quic::stream::SendStream;
+use std::error::Error;
 use tokio::runtime::Handle;
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
@@ -12,9 +11,19 @@ use tokio::task::JoinHandle;
 
 use crate::common::HandleChannelError;
 
-const DEBUG_CHANNEL_SIZE: usize = 256;
-const CONTROL_CHANNEL_SIZE: usize = 256;
-const OUTBOUND_CHANNEL_SIZE: usize = 1024;
+type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
+
+/// How many errors can be sent at a single time without being dropped
+const DEBUG_CHANNEL_SIZE: usize = 32;
+/// How many commands can be sent to the send socket without being processed before being dropped
+const CONTROL_CHANNEL_SIZE: usize = 32;
+/// How many messages can sit between async and bevy before being dropped
+const OUTBOUND_CHANNEL_SIZE: usize = 128;
+
+/// Minimum size of the send buffer of Bytes chunks we can receive at once is to send to bevy
+const MIN_OUTBOUND_BUF_SIZE: usize = 64;
+/// Maximum size of the send buffer of Bytes chunks we can receive at once is to send to bevy
+const MAX_OUTBOUND_BUF_SIZE: usize = 128;
 
 pub struct QuicSendStream {
     send_task: JoinHandle<()>,
@@ -27,21 +36,24 @@ pub struct QuicSendStream {
 impl QuicSendStream {
     pub fn new(runtime: Handle, send: SendStream) -> Self {
         let stream_id = send.id();
+        let addr = send.connection().local_addr();
 
         let (send_error_sender, send_errors) = mpsc::channel(DEBUG_CHANNEL_SIZE);
         let (outbound_control, outbound_control_receiver) = mpsc::channel(CONTROL_CHANNEL_SIZE);
         let (outbound_data, outbound_data_receiver) = mpsc::channel(OUTBOUND_CHANNEL_SIZE);
 
+        let task = SendTask {
+            send,
+            control: outbound_control_receiver,
+            outbound_receiver: outbound_data_receiver,
+            send_errors: send_error_sender,
+            break_flag: false,
+            addr,
+            id: stream_id,
+        };
+
         let span = bevy::log::info_span!("quic_send_task");
-        let send_task = runtime.spawn(
-            outbound_send_task(
-                send,
-                outbound_control_receiver,
-                outbound_data_receiver,
-                send_error_sender,
-            )
-            .instrument(span),
-        );
+        let send_task = runtime.spawn(task.start().instrument(span));
 
         Self {
             send_task,
@@ -115,122 +127,127 @@ impl QuicSendStream {
     }
 }
 
-// TODO: refactor this into a structure
-async fn outbound_send_task(
-    mut send: SendStream,
-    mut control: Receiver<SendControlMessage>,
-    mut outbound_receiver: Receiver<Bytes>,
-    send_errors: Sender<Box<dyn Error + Send + Sync>>,
-) {
-    let addr = send.connection().remote_addr();
-    let id = send.id();
-    info!("Opened send stream from: {:?}, with ID: {}", addr, id);
+struct SendTask {
+    pub(crate) send: SendStream,
+    pub(crate) control: Receiver<SendControlMessage>,
+    pub(crate) outbound_receiver: Receiver<Bytes>,
+    pub(crate) send_errors: Sender<Box<dyn Error + Send + Sync>>,
+    pub(crate) break_flag: bool,
+    pub(crate) addr: AddrResult,
+    pub(crate) id: u64,
+}
 
-    let mut send_buf = Vec::with_capacity(OUTBOUND_CHANNEL_SIZE);
+impl SendTask {
+    async fn start(mut self) {
+        info!(
+            "Opened send stream from: {:?}, with ID: {}",
+            self.addr, self.id
+        );
 
-    'running: loop {
-        let mut break_flag = false;
+        let mut send_buf = Vec::with_capacity(MIN_OUTBOUND_BUF_SIZE);
 
-        select! {
-            count = outbound_receiver.recv_many(&mut send_buf, OUTBOUND_CHANNEL_SIZE) => {
-                // channel closed
-                if count == 0 {
-                    warn!(
-                        "Outbound send channel is closed. Closing send stream from: {:?}, with ID: {}",
-                        addr, id
-                    );
+        'running: loop {
+            select! {
+                count = self.outbound_receiver.recv_many(&mut send_buf, MAX_OUTBOUND_BUF_SIZE) => {
+                    // channel closed
+                    if count == 0 {
+                        warn!(
+                            "Outbound send channel is closed. Closing send stream from: {:?}, with ID: {}",
+                            self.addr, self.id
+                        );
 
-                    break_flag = true;
-                }
-
-                let err_opt = send.send_vectored(&mut send_buf[..count]).await;
-                send_buf.clear();
-
-                if let Err(err) = err_opt {
-                    match &err {
-                        s2n_quic::stream::Error::InvalidStream { source, .. }
-                        | s2n_quic::stream::Error::SendAfterFinish { source, .. } => {
-                            error!(
-                                "Send stream from: {:?}, ID: {}, is in an invalid state:\n{}",
-                                addr, id, source
-                            );
-                        }
-                        s2n_quic::stream::Error::StreamReset {
-                            error, source: _, ..
-                        } => {
-                            error!(
-                                "Send stream from: {:?}, ID: {}, has encountered a stream reset:\n{}",
-                                addr, id, error
-                            );
-                            break_flag = true;
-                        }
-
-                        _ => {}
+                        self.break_flag = true;
                     }
 
-                    send_errors.try_send(Box::new(err)).handle_err();
+                    let err_opt = self.send.send_vectored(&mut send_buf[..count]).await;
+                    send_buf.clear();
+
+                    if let Err(err) = err_opt {
+                        match &err {
+                            s2n_quic::stream::Error::InvalidStream { source, .. }
+                            | s2n_quic::stream::Error::SendAfterFinish { source, .. } => {
+                                error!(
+                                    "Send stream from: {:?}, ID: {}, is in an invalid state:\n{}",
+                                    self.addr, self.id, source
+                                );
+                            }
+                            s2n_quic::stream::Error::StreamReset {
+                                error, source: _, ..
+                            } => {
+                                error!(
+                                    "Send stream from: {:?}, ID: {}, has encountered a stream reset:\n{}",
+                                    self.addr, self.id, error
+                                );
+                                self.break_flag = true;
+                            }
+
+                            _ => {}
+                        }
+
+                        self.send_errors.try_send(Box::new(err)).handle_err();
+                    }
+                }
+
+                cmd_opt = self.control.recv() => {
+                    if let Some(cmd) = cmd_opt {
+                        match cmd {
+                            SendControlMessage::CloseAndQuit => {
+                                let res = self.send.close().await;
+
+                                if let Err(e) = res {
+                                    error!(
+                                        "Send stream from: {:?}, ID: {}, errored when closing stream:\n{}",
+                                        self.addr, self.id, e
+                                    );
+
+                                    self.send_errors.try_send(Box::new(e)).handle_err();
+                                }
+
+                                self.break_flag = true;
+                            }
+                            SendControlMessage::Flush => {
+                                let res = self.send.flush().await;
+
+                                if let Err(e) = res {
+                                    error!(
+                                        "Send stream from: {:?}, ID: {}, errored when flushing stream:\n{}",
+                                        self.addr, self.id, e
+                                    );
+
+                                    self.send_errors.try_send(Box::new(e)).handle_err();
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        // Control channel has been dropped
+                        info!(
+                            "Control channel for send stream ID: {} has been dropped. Quitting...",
+                            self.id
+                        );
+                        self.break_flag = true;
+                    };
                 }
             }
 
-            cmd_opt = control.recv() => {
-                if let Some(cmd) = cmd_opt {
-                    match cmd {
-                        SendControlMessage::CloseAndQuit => {
-                            let res = send.close().await;
-
-                            if let Err(e) = res {
-                                error!(
-                                    "Send stream from: {:?}, ID: {}, errored when closing stream:\n{}",
-                                    addr, id, e
-                                );
-
-                                send_errors.try_send(Box::new(e)).handle_err();
-                            }
-
-                            break_flag = true;
-                        }
-                        SendControlMessage::Flush => {
-                            let res = send.flush().await;
-
-                            if let Err(e) = res {
-                                error!(
-                                    "Send stream from: {:?}, ID: {}, errored when flushing stream:\n{}",
-                                    addr, id, e
-                                );
-
-                                send_errors.try_send(Box::new(e)).handle_err();
-                            }
-                        }
-                    }
-                }
-                else {
-                    // Control channel has been dropped
-                    info!(
-                        "Control channel for send stream ID: {} has been dropped. Quitting...",
-                        id
-                    );
-                    break_flag = true;
-                };
+            if self.break_flag {
+                break 'running;
             }
         }
 
-        if break_flag {
-            break 'running;
+        info!(
+            "Send stream from: {:?}, with ID: {}, has been closed",
+            self.addr, self.id
+        );
+
+        let dropped_count = self.outbound_receiver.len();
+
+        if dropped_count > 0 {
+            warn!(
+                "Send stream ID: {} dropped {} messages, this will result in loss of data being sent",
+                self.id, dropped_count
+            )
         }
-    }
-
-    info!(
-        "Send stream from: {:?}, with ID: {}, has been closed",
-        addr, id
-    );
-
-    let dropped_count = outbound_receiver.len();
-
-    if dropped_count > 0 {
-        warn!(
-            "Send stream ID: {} dropped {} messages, this will result in loss of data being sent",
-            id, dropped_count
-        )
     }
 }
 

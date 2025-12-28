@@ -11,15 +11,19 @@ use tokio::{
     time::Instant as TokioInstant,
 };
 
-type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
-
 use crate::common::HandleChannelError;
 
-/// How many messages can sit between async and bevy before being dropped
-const CHANNEL_BUFF_SIZE: usize = 128;
+type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
 
-/// How big the receive buffer of Bytes chunks we can receive at once is
-const BUFF_SIZE: usize = 64;
+/// How many errors can be sent at a single time without being dropped
+const DEBUG_CHANNEL_SIZE: usize = 64;
+/// How many commands can be sent to the receive socket without being processed before being dropped
+const CONTROL_CHANNEL_SIZE: usize = 32;
+/// How many messages can sit between async and bevy before being dropped
+const INBOUND_CHANNEL_SIZE: usize = 128;
+
+/// How big the receive buffer of Bytes chunks we can receive at once is to be sent to Bevy
+const INBOUND_BUFF_SIZE: usize = 64;
 
 pub struct QuicReceiveStream {
     rec_task: JoinHandle<()>,
@@ -34,9 +38,9 @@ impl QuicReceiveStream {
         let stream_id = rec.id();
         let addr = rec.connection().remote_addr();
 
-        let (inbound_control, inbound_control_receiver) = mpsc::channel(CHANNEL_BUFF_SIZE);
-        let (inbound_data_sender, inbound_data) = mpsc::channel(CHANNEL_BUFF_SIZE);
-        let (receive_error_sender, receive_errors) = mpsc::channel(CHANNEL_BUFF_SIZE);
+        let (receive_error_sender, receive_errors) = mpsc::channel(DEBUG_CHANNEL_SIZE);
+        let (inbound_control, inbound_control_receiver) = mpsc::channel(CONTROL_CHANNEL_SIZE);
+        let (inbound_data_sender, inbound_data) = mpsc::channel(INBOUND_CHANNEL_SIZE);
 
         let task = RecTask {
             rec,
@@ -120,11 +124,12 @@ struct RecTask {
 
 impl RecTask {
     async fn start(mut self) {
-        let addr = self.rec.connection().remote_addr();
-        let id = self.rec.id();
-        info!("Opened receive stream from: {:?}, with ID: {}", addr, id);
+        info!(
+            "Opened receive stream from: {:?}, with ID: {}",
+            self.addr, self.id
+        );
 
-        let mut read_buf: [Bytes; BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
+        let mut read_buf: [Bytes; INBOUND_BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
         'running: loop {
             select! {
@@ -149,7 +154,7 @@ impl RecTask {
                     else {
                         info!(
                             "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
-                            addr, id
+                            self.addr, self.id
                         );
                         self.break_flag = true;
                     };
@@ -176,13 +181,13 @@ impl RecTask {
 
         info!(
             "Receive stream from: {:?}, with ID: {}, has been closed",
-            addr, id
+            self.addr, self.id
         );
     }
 
     fn handle_receive_result(
         &mut self,
-        read_buf: &mut [Bytes; BUFF_SIZE],
+        read_buf: &mut [Bytes; INBOUND_BUFF_SIZE],
         result: Result<(usize, bool), s2n_quic::stream::Error>,
     ) {
         match result {
