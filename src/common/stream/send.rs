@@ -7,9 +7,10 @@ use tokio::runtime::Handle;
 use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::task::JoinHandle;
 
 use crate::common::HandleChannelError;
+use crate::common::stream::disconnect::StreamDisconnectReason;
+use crate::common::stream::task_state::StreamTaskState;
 
 type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
 
@@ -26,7 +27,7 @@ const MIN_OUTBOUND_BUF_SIZE: usize = 64;
 const MAX_OUTBOUND_BUF_SIZE: usize = 128;
 
 pub struct QuicSendStream {
-    send_task: JoinHandle<()>,
+    task_state: StreamTaskState,
     outbound_data: Sender<Bytes>,
     outbound_control: Sender<SendControlMessage>,
     send_errors: Receiver<Box<dyn Error + Send + Sync>>,
@@ -47,16 +48,17 @@ impl QuicSendStream {
             control: outbound_control_receiver,
             outbound_receiver: outbound_data_receiver,
             send_errors: send_error_sender,
-            break_flag: false,
+            disconnect_flag: None,
             addr,
             id: stream_id,
         };
 
         let span = bevy::log::info_span!("quic_send_task");
         let send_task = runtime.spawn(task.start().instrument(span));
+        let task_state = StreamTaskState::new(runtime, send_task);
 
         Self {
-            send_task,
+            task_state,
             outbound_data,
             outbound_control,
             send_errors,
@@ -85,7 +87,7 @@ impl QuicSendStream {
     /// Checks if the async task for the stream is still running, in which case
     /// the stream should still be open, if not the task should finish on its own.
     pub fn is_open(&self) -> bool {
-        !self.send_task.is_finished()
+        !self.task_state.is_finished()
     }
 
     pub fn send(&mut self, data: Bytes) -> Result<(), TrySendError<Bytes>> {
@@ -125,6 +127,10 @@ impl QuicSendStream {
             error!("Sender ID: {}, encountered error:\n{}", self.stream_id, err);
         }
     }
+
+    pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
+        self.task_state.get_disconnect_reason()
+    }
 }
 
 struct SendTask {
@@ -132,13 +138,13 @@ struct SendTask {
     pub(crate) control: Receiver<SendControlMessage>,
     pub(crate) outbound_receiver: Receiver<Bytes>,
     pub(crate) send_errors: Sender<Box<dyn Error + Send + Sync>>,
-    pub(crate) break_flag: bool,
+    pub(crate) disconnect_flag: Option<StreamDisconnectReason>,
     pub(crate) addr: AddrResult,
     pub(crate) id: u64,
 }
 
 impl SendTask {
-    async fn start(mut self) {
+    async fn start(mut self) -> StreamDisconnectReason {
         info!(
             "Opened send stream from: {:?}, with ID: {}",
             self.addr, self.id
@@ -156,21 +162,23 @@ impl SendTask {
                             self.addr, self.id
                         );
 
-                        self.break_flag = true;
+                        self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed{channel_name: "Outbound channel".into()})
                     }
 
                     let err_opt = self.send.send_vectored(&mut send_buf[..count]).await;
                     send_buf.clear();
 
                     if let Err(err) = err_opt {
-                        match &err {
+                        match err {
                             s2n_quic::stream::Error::InvalidStream { source, .. }
                             | s2n_quic::stream::Error::SendAfterFinish { source, .. } => {
                                 error!(
                                     "Send stream from: {:?}, ID: {}, is in an invalid state:\n{}",
                                     self.addr, self.id, source
                                 );
+                                self.disconnect_flag = Some(StreamDisconnectReason::InvalidStream)
                             }
+
                             s2n_quic::stream::Error::StreamReset {
                                 error, source: _, ..
                             } => {
@@ -178,10 +186,15 @@ impl SendTask {
                                     "Send stream from: {:?}, ID: {}, has encountered a stream reset:\n{}",
                                     self.addr, self.id, error
                                 );
-                                self.break_flag = true;
+                                self.disconnect_flag = Some(StreamDisconnectReason::Reset(error));
                             }
 
-                            _ => {}
+                            _ => {
+                                error!(
+                                    "Send stream from: {:?}, ID: {}, error:\n{}",
+                                    self.addr, self.id, err
+                                );
+                            }
                         }
 
                         self.send_errors.try_send(Box::new(err)).handle_err();
@@ -203,8 +216,9 @@ impl SendTask {
                                     self.send_errors.try_send(Box::new(e)).handle_err();
                                 }
 
-                                self.break_flag = true;
+                                self.disconnect_flag = Some(StreamDisconnectReason::Closed);
                             }
+
                             SendControlMessage::Flush => {
                                 let res = self.send.flush().await;
 
@@ -225,12 +239,12 @@ impl SendTask {
                             "Control channel for send stream ID: {} has been dropped. Quitting...",
                             self.id
                         );
-                        self.break_flag = true;
+                        self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed{channel_name: "Control channel".into()})
                     };
                 }
             }
 
-            if self.break_flag {
+            if self.disconnect_flag.is_some() {
                 break 'running;
             }
         }
@@ -247,6 +261,14 @@ impl SendTask {
                 "Send stream ID: {} dropped {} messages, this will result in loss of data being sent",
                 self.id, dropped_count
             )
+        }
+
+        if let Some(reason) = self.disconnect_flag {
+            reason
+        }
+        // In theory this should never happen
+        else {
+            StreamDisconnectReason::NoReason
         }
     }
 }

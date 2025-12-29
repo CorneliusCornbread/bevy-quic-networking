@@ -9,7 +9,7 @@ use crate::{
     common::{
         attempt::QuicActionError,
         stream::{
-            QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
+            receive::QuicReceiveStream, send::QuicSendStream, QuicBidirectionalStreamAttempt,
         },
     },
     server::marker::QuicServerMarker,

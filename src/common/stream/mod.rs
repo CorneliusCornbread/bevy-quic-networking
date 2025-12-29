@@ -6,12 +6,13 @@ use crate::common::{
     stream::{receive::QuicReceiveStream, send::QuicSendStream},
 };
 
-// pub mod codec;
+pub mod disconnect;
 pub mod id;
 pub mod plugin;
 pub mod receive;
 pub mod send;
 pub mod session;
+pub mod task_state;
 
 #[derive(Deref, DerefMut)]
 pub struct QuicReceiveStreamAttempt(QuicActionAttempt<QuicReceiveStream>);

@@ -12,8 +12,8 @@ use crate::{
         attempt::QuicActionError,
         connection::BidirectionalSessionAttempt,
         stream::{
-            QuicBidirectionalStreamAttempt, id::StreamId, receive::QuicReceiveStream,
-            send::QuicSendStream,
+            id::StreamId, receive::QuicReceiveStream, send::QuicSendStream,
+            QuicBidirectionalStreamAttempt,
         },
     },
 };
