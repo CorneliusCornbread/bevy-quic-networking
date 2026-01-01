@@ -11,7 +11,10 @@ use tokio::{
     time::Instant as TokioInstant,
 };
 
-use crate::common::HandleChannelError;
+use crate::common::{
+    HandleChannelError,
+    stream::{disconnect::StreamDisconnectReason, task_state::StreamTaskState},
+};
 
 type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
 
@@ -26,7 +29,7 @@ const INBOUND_CHANNEL_SIZE: usize = 128;
 const INBOUND_BUFF_SIZE: usize = 64;
 
 pub struct QuicReceiveStream {
-    rec_task: JoinHandle<()>,
+    task_state: StreamTaskState,
     inbound_data: Receiver<RecvPacket>,
     inbound_control: Sender<RecControlMessage>,
     receive_errors: Receiver<Box<dyn Error + Send + Sync>>,
@@ -47,16 +50,17 @@ impl QuicReceiveStream {
             control: inbound_control_receiver,
             inbound_sender: inbound_data_sender,
             receive_errors: receive_error_sender,
-            break_flag: false,
+            disconnect_flag: None,
             addr,
             id: stream_id,
         };
 
         let span = bevy::log::info_span!("quic_rec_task");
         let rec_task = runtime.spawn(task.start().instrument(span));
+        let task_state = StreamTaskState::new(runtime, rec_task);
 
         Self {
-            rec_task,
+            task_state,
             inbound_data,
             inbound_control,
             receive_errors,
@@ -77,7 +81,7 @@ impl QuicReceiveStream {
     }
 
     pub fn is_open(&self) -> bool {
-        !self.rec_task.is_finished()
+        !self.task_state.is_finished()
     }
 
     pub fn stop_send(&mut self, err_code: ErrorCode) {
@@ -106,6 +110,10 @@ impl QuicReceiveStream {
             );
         }
     }
+
+    pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
+        self.task_state.get_disconnect_reason()
+    }
 }
 
 enum RecControlMessage {
@@ -117,13 +125,13 @@ struct RecTask {
     pub(crate) control: Receiver<RecControlMessage>,
     pub(crate) inbound_sender: Sender<RecvPacket>,
     pub(crate) receive_errors: Sender<Box<dyn Error + Send + Sync>>,
-    pub(crate) break_flag: bool,
+    pub(crate) disconnect_flag: Option<StreamDisconnectReason>,
     pub(crate) addr: AddrResult,
     pub(crate) id: u64,
 }
 
 impl RecTask {
-    async fn start(mut self) {
+    async fn start(mut self) -> StreamDisconnectReason {
         info!(
             "Opened receive stream from: {:?}, with ID: {}",
             self.addr, self.id
@@ -143,7 +151,7 @@ impl RecTask {
                     if let Some(cmd) = cmd_opt {
                         match cmd {
                             RecControlMessage::StopSend(error_code) => {
-                                self.break_flag = true;
+                                self.disconnect_flag = Some(StreamDisconnectReason::Reset(error_code));
 
                                 if let Err(stream_err) = self.rec.stop_sending(error_code) {
                                     warn!("Stream error on receive stop_send():\n{stream_err}");
@@ -156,12 +164,14 @@ impl RecTask {
                             "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
                             self.addr, self.id
                         );
-                        self.break_flag = true;
+                        self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed {
+                            channel_name: "Control channel".into()
+                        })
                     };
                 }
             }
 
-            if self.break_flag {
+            if self.disconnect_flag.is_some() {
                 break 'running;
             }
         }
@@ -183,6 +193,12 @@ impl RecTask {
             "Receive stream from: {:?}, with ID: {}, has been closed",
             self.addr, self.id
         );
+
+        if let Some(reason) = self.disconnect_flag {
+            return reason;
+        }
+
+        StreamDisconnectReason::NoReason
     }
 
     fn handle_receive_result(
@@ -206,24 +222,24 @@ impl RecTask {
                 }
 
                 if !is_open {
-                    self.break_flag = true;
+                    self.disconnect_flag = Some(StreamDisconnectReason::Closed);
                 }
             }
             Err(e) => {
                 match e {
                     s2n_quic::stream::Error::ConnectionError { error, .. } => {
                         error!("Receive stream connection error: {error}");
-                        self.break_flag = true;
+                        self.disconnect_flag = Some(StreamDisconnectReason::ConnectionError(error));
                     }
 
                     s2n_quic::stream::Error::InvalidStream { source, .. } => {
                         error!("Invalid receive stream: {source}");
-                        self.break_flag = true;
+                        self.disconnect_flag = Some(StreamDisconnectReason::InvalidStream);
                     }
 
                     s2n_quic::stream::Error::StreamReset { error, source, .. } => {
                         error!("Receive stream reset: {error}, Source: {source}");
-                        self.break_flag = true;
+                        self.disconnect_flag = Some(StreamDisconnectReason::Reset(error));
                     }
 
                     _ => {
@@ -253,7 +269,9 @@ impl RecTask {
                     "The inbound receive channel from: {:?}, with ID: {}, is closed. The message received will be dropped and the stream will be closed.",
                     self.addr, self.id
                 );
-                self.break_flag = true;
+                self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed {
+                    channel_name: "Inbound receive channel".into(),
+                });
             }
         }
     }
