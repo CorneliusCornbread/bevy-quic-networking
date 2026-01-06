@@ -1,5 +1,6 @@
-use aeronet_io::{bytes::Bytes, packet::RecvPacket};
+use aeronet_io::packet::RecvPacket;
 use bevy::log::{error, info, tracing::Instrument, warn};
+use bytes::Bytes;
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
 use std::error::Error;
@@ -7,7 +8,6 @@ use tokio::{
     runtime::Handle,
     select,
     sync::mpsc::{self, Receiver, Sender},
-    task::JoinHandle,
     time::Instant as TokioInstant,
 };
 
