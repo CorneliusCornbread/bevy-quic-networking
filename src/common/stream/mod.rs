@@ -11,6 +11,7 @@ pub mod id;
 pub mod plugin;
 pub mod receive;
 pub mod send;
+#[cfg(feature = "aeronet_io")]
 pub mod session;
 pub mod task_state;
 

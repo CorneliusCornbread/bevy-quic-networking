@@ -1,16 +1,15 @@
-#[cfg(feature = "aeronet_io")]
 use aeronet_io::Session;
-
-use bevy::{
-    app::{Plugin, PreUpdate},
-    ecs::{component::Component, query::With, system::Query},
-    log::warn,
-};
+use bevy::app::{Plugin, PreUpdate};
 use std::time::Instant;
 
+#[cfg(feature = "aeronet_io")]
 use crate::{
     client::stream::QuicClientSendStream, common::stream::id::StreamId,
     server::stream::QuicServerReceiveStream,
+};
+use bevy::{
+    ecs::{component::Component, query::With, system::Query},
+    log::warn,
 };
 
 const MIN_MTU: usize = 1200;
@@ -18,7 +17,7 @@ const MAX_PACKET_TRANSFER: usize = 512;
 const PACKET_WARN_THRESH: usize = 400;
 
 #[derive(Component, Default)]
-#[cfg_attr(feature = "aeronet_io", require(Session::new(Instant::now(), MIN_MTU)))]
+#[require(Session::new(Instant::now(), MIN_MTU))]
 pub struct QuicSession;
 
 pub struct QuicAeronetPlugin;
@@ -30,6 +29,7 @@ impl Plugin for QuicAeronetPlugin {
     }
 }
 
+#[cfg(feature = "aeronet_io")]
 fn drain_recv_packets(
     query: Query<(&mut Session, &mut QuicServerReceiveStream), With<QuicSession>>,
 ) {

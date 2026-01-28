@@ -1,3 +1,4 @@
+#[cfg(feature = "aeronet_io")]
 use aeronet_io::packet::RecvPacket;
 use bevy::log::{error, info, tracing::Instrument, warn};
 use bytes::Bytes;
@@ -68,6 +69,7 @@ impl QuicReceiveStream {
         }
     }
 
+    // TODO: Roll custom RecvPacket
     pub fn poll_recv(&mut self) -> Option<RecvPacket> {
         if self.inbound_data.is_empty() {
             return None;
