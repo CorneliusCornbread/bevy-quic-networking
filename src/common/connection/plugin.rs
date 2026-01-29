@@ -117,7 +117,7 @@ fn client_connection_attempt(
 
             let mut error_entity = commands.entity(entity);
 
-            //#[cfg(feature = "connection-errors")]
+            #[cfg(feature = "connection-errors")]
             {
                 use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
 

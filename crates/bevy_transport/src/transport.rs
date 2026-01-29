@@ -1,6 +1,6 @@
 use bevy::prelude::{Component, Query, ResMut, Resource};
 use bytes::Bytes;
-use std::collections::{vec_deque::Drain, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque, vec_deque::Drain};
 
 use crate::message::{InboundMessage, OutboundMessage};
 
@@ -78,9 +78,6 @@ pub fn rec_messages(mut rec: ResMut<NetReceiver>, mut buffers: Query<&mut NetObj
     let mut message_map: HashMap<i32, VecDeque<Bytes>> = HashMap::new();
     for message in rec.deque_messages() {
         if let Some(pending_messages) = message_map.get_mut(&message.target_id) {
-            // TODO: Using the bytes crate may not be necessary.
-            // I wonder if we could just passed around an owned buffer of
-            // memory instead of a Arc<T> of a buffer by transferring ownership.
             pending_messages.push_back(message.data);
         } else {
             let mut messages = VecDeque::new();
