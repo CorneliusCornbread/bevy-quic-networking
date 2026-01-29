@@ -19,6 +19,19 @@ const PACKET_WARN_THRESH: usize = 400;
 #[require(Session::new(Instant::now(), MIN_MTU))]
 pub struct QuicSession;
 
+// NOTE:
+// Aeronet_IO is being left as a hard dependency as of now,
+// the cost of having to convert to Aeronet structures is
+// far too much of a maintenance burden due to unsafe requirements
+// for efficient vec transmutation. We're using std::mem::swap
+// to efficiency move buffers of data around and doing that
+// efficiently when Aeronet is not a hard dep is a nightmare.
+//
+// Dropping Aeronet from your app is as simple as not including
+// the Aeronet plugin in your app.
+//
+// The IO layer is a couple hundred lines of code, you may consume
+// mine weiner if this is upsetting to you. - Cornelius
 pub struct QuicAeronetPlugin;
 
 impl Plugin for QuicAeronetPlugin {
