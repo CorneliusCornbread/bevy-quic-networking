@@ -2,7 +2,6 @@ use aeronet_io::Session;
 use bevy::app::{Plugin, PreUpdate};
 use std::time::Instant;
 
-#[cfg(feature = "aeronet_io")]
 use crate::{
     client::stream::QuicClientSendStream, common::stream::id::StreamId,
     server::stream::QuicServerReceiveStream,
@@ -29,7 +28,6 @@ impl Plugin for QuicAeronetPlugin {
     }
 }
 
-#[cfg(feature = "aeronet_io")]
 fn drain_recv_packets(
     query: Query<(&mut Session, &mut QuicServerReceiveStream), With<QuicSession>>,
 ) {

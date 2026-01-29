@@ -1,4 +1,3 @@
-#[cfg(feature = "aeronet_io")]
 use aeronet_io::packet::RecvPacket;
 use bevy::log::{error, info, tracing::Instrument, warn};
 use bytes::Bytes;
