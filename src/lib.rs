@@ -12,7 +12,10 @@ pub use s2n_quic::client::Client;
 use crate::{
     common::{
         connection::plugin::ConnectionAttemptPlugin,
-        stream::{plugin::StreamAttemptPlugin, session::QuicAeronetPlugin},
+        stream::{
+            plugin::StreamAttemptPlugin,
+            session::{QuicAeronetEventPlugin, QuicAeronetPacketPlugin},
+        },
     },
     plugin::QuicAsyncPlugin,
     server::accepter::SimpleServerAccepterPlugin,
@@ -35,10 +38,7 @@ pub struct QuicAeronetPlugins;
 impl PluginGroup for QuicAeronetPlugins {
     fn build(self) -> bevy::app::PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
-            .add(QuicAsyncPlugin::default())
-            .add(ConnectionAttemptPlugin)
-            .add(StreamAttemptPlugin)
-            .add(QuicAeronetPlugin)
-            .add(SimpleServerAccepterPlugin)
+            .add(QuicAeronetPacketPlugin)
+            .add(QuicAeronetEventPlugin)
     }
 }

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use tokio::{runtime::Handle, task::JoinHandle};
 
 use crate::common::stream::disconnect::StreamDisconnectReason;
@@ -30,23 +29,36 @@ impl StreamTaskState {
     pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
         if let Some(join) = self.task.take() {
             if !join.is_finished() {
+                self.task = Some(join);
                 return None;
             }
 
             let join_res = self.runtime.block_on(join);
 
             if let Err(reason) = join_res {
-                return Some(StreamDisconnectReason::InternalError(Arc::new(reason)));
+                self.disconnect_reason =
+                    Some(StreamDisconnectReason::InternalError(Arc::new(reason)));
+
+                return self.disconnect_reason.clone();
             }
 
-            return Some(join_res.unwrap());
+            self.disconnect_reason = Some(join_res.unwrap());
+
+            return self.disconnect_reason.clone();
         }
 
-        let reason = self.disconnect_reason
-            .as_ref()
-            .expect("Stream task is in invalid state, neither a join handle nor a disconnect reason was found.")
-            .clone();
+        if self.disconnect_reason.is_none() {
+            #[cfg(debug_assertions)]
+            panic!(
+                "Stream task is in invalid state, neither a join handle nor a disconnect reason was found."
+            );
 
-        Some(reason)
+            #[cfg(not(debug_assertions))]
+            bevy::log::error!(
+                "Stream task is in invalid state, neither a join handle nor a disconnect reason was found. Returning none, this may result in weird behaviour."
+            );
+        }
+
+        self.disconnect_reason.clone()
     }
 }

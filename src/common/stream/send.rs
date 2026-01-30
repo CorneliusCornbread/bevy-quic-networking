@@ -216,7 +216,7 @@ impl SendTask {
                                     self.send_errors.try_send(Box::new(e)).handle_err();
                                 }
 
-                                self.disconnect_flag = Some(StreamDisconnectReason::Closed);
+                                self.disconnect_flag = Some(StreamDisconnectReason::UserClosed);
                             }
 
                             SendControlMessage::Flush => {

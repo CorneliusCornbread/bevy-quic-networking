@@ -151,7 +151,7 @@ impl RecTask {
                     if let Some(cmd) = cmd_opt {
                         match cmd {
                             RecControlMessage::StopSend(error_code) => {
-                                self.disconnect_flag = Some(StreamDisconnectReason::Reset(error_code));
+                                self.disconnect_flag = Some(StreamDisconnectReason::UserClosed);
 
                                 if let Err(stream_err) = self.rec.stop_sending(error_code) {
                                     warn!("Stream error on receive stop_send():\n{stream_err}");
@@ -222,7 +222,7 @@ impl RecTask {
                 }
 
                 if !is_open {
-                    self.disconnect_flag = Some(StreamDisconnectReason::Closed);
+                    self.disconnect_flag = Some(StreamDisconnectReason::PeerClosed);
                 }
             }
             Err(e) => {

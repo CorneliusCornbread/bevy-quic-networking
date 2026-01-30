@@ -1,10 +1,17 @@
-use aeronet_io::Session;
-use bevy::app::{Plugin, PreUpdate};
+use aeronet_io::{Session, connection::Disconnected};
+use bevy::{
+    app::{Plugin, PostUpdate, PreUpdate},
+    ecs::{
+        entity::Entity,
+        system::{Command, Commands},
+    },
+};
 use std::time::Instant;
 
 use crate::{
-    client::stream::QuicClientSendStream, common::stream::id::StreamId,
-    server::stream::QuicServerReceiveStream,
+    client::stream::{QuicClientReceiveStream, QuicClientSendStream},
+    common::stream::{disconnect::StreamDisconnectReason, id::StreamId},
+    server::stream::{QuicServerReceiveStream, QuicServerSendStream},
 };
 use bevy::{
     ecs::{component::Component, query::With, system::Query},
@@ -32,12 +39,27 @@ pub struct QuicSession;
 //
 // The IO layer is a couple hundred lines of code, you may consume
 // mine weiner if this is upsetting to you. - Cornelius
-pub struct QuicAeronetPlugin;
+pub struct QuicAeronetPacketPlugin;
 
-impl Plugin for QuicAeronetPlugin {
+impl Plugin for QuicAeronetPacketPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(PreUpdate, drain_recv_packets)
-            .add_systems(PreUpdate, drain_send_packets);
+        app.add_systems(PreUpdate, (drain_recv_packets, drain_send_packets));
+    }
+}
+
+pub struct QuicAeronetEventPlugin;
+
+impl Plugin for QuicAeronetEventPlugin {
+    fn build(&self, app: &mut bevy::app::App) {
+        app.add_systems(
+            PostUpdate,
+            (
+                fire_server_send_disconnect_events,
+                fire_server_rec_disconnect_events,
+                fire_client_send_disconnect_events,
+                fire_client_rec_disconnect_events,
+            ),
+        );
     }
 }
 
@@ -91,4 +113,55 @@ fn drain_send_packets(
             )
         }
     }
+}
+
+fn fire_server_send_disconnect_events(
+    mut cmd: Commands,
+    query: Query<(&mut QuicServerReceiveStream, Entity), With<Session>>,
+) {
+    for (mut rec, entity) in query {
+        if let Some(reason) = rec.get_disconnect_reason() {
+            fire_disconnect(&mut cmd, entity, reason);
+        }
+    }
+}
+
+fn fire_server_rec_disconnect_events(
+    mut cmd: Commands,
+    query: Query<(&mut QuicServerSendStream, Entity), With<Session>>,
+) {
+    for (mut rec, entity) in query {
+        if let Some(reason) = rec.get_disconnect_reason() {
+            fire_disconnect(&mut cmd, entity, reason);
+        }
+    }
+}
+
+fn fire_client_send_disconnect_events(
+    mut cmd: Commands,
+    query: Query<(&mut QuicClientSendStream, Entity), With<Session>>,
+) {
+    for (mut rec, entity) in query {
+        if let Some(reason) = rec.get_disconnect_reason() {
+            fire_disconnect(&mut cmd, entity, reason);
+        }
+    }
+}
+
+fn fire_client_rec_disconnect_events(
+    mut cmd: Commands,
+    query: Query<(&mut QuicClientReceiveStream, Entity), With<Session>>,
+) {
+    for (mut rec, entity) in query {
+        if let Some(reason) = rec.get_disconnect_reason() {
+            fire_disconnect(&mut cmd, entity, reason);
+        }
+    }
+}
+
+fn fire_disconnect(cmd: &mut Commands, entity: Entity, reason: StreamDisconnectReason) {
+    cmd.trigger(Disconnected {
+        entity,
+        reason: reason.into(),
+    });
 }
