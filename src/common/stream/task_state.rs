@@ -27,12 +27,12 @@ impl StreamTaskState {
     }
 
     pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
-        if let Some(join) = self.task.take() {
-            if !join.is_finished() {
-                self.task = Some(join);
+        if let Some(join_ref) = self.task.as_ref() {
+            if !join_ref.is_finished() {
                 return None;
             }
 
+            let join = self.task.take().unwrap();
             let join_res = self.runtime.block_on(join);
 
             if let Err(reason) = join_res {
