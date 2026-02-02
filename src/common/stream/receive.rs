@@ -68,7 +68,8 @@ impl QuicReceiveStream {
         }
     }
 
-    pub fn poll_recv(&mut self) -> Option<RecvPacket> {
+    /// Receives a single packet from the QUIC stream.
+    pub fn recv(&mut self) -> Option<RecvPacket> {
         if self.inbound_data.is_empty() {
             return None;
         }
@@ -76,10 +77,13 @@ impl QuicReceiveStream {
         self.inbound_data.blocking_recv()
     }
 
-    pub fn blocking_recv_many(&mut self, buffer: &mut Vec<RecvPacket>, limit: usize) -> usize {
+    /// Receive multiple packets of data and push them to the given
+    /// buffer for reading.
+    pub fn recv_many(&mut self, buffer: &mut Vec<RecvPacket>, limit: usize) -> usize {
         self.inbound_data.blocking_recv_many(buffer, limit)
     }
 
+    /// Returns `true` if this stream is still open
     pub fn is_open(&self) -> bool {
         !self.task_state.is_finished()
     }
@@ -98,6 +102,8 @@ impl QuicReceiveStream {
         );
     }
 
+    /// Outputs any outstanding errors that have happened on the
+    /// async side of this stream.
     pub fn log_outstanding_errors(&mut self) {
         while !self.receive_errors.is_empty() {
             let Some(err) = self.receive_errors.blocking_recv() else {
@@ -111,6 +117,8 @@ impl QuicReceiveStream {
         }
     }
 
+    /// Gets the disconnect reason if the stream has closed.
+    /// Returns `None` if the stream is still open.
     pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
         self.task_state.get_disconnect_reason()
     }

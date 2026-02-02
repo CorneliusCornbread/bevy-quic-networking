@@ -74,7 +74,7 @@ fn drain_recv_packets(
     for entity in query {
         let (mut session, mut rec) = entity;
 
-        let size = rec.blocking_recv_many(&mut buffer, MAX_PACKET_TRANSFER);
+        let size = rec.recv_many(&mut buffer, MAX_PACKET_TRANSFER);
 
         if size >= PACKET_WARN_THRESH {
             #[cfg(feature = "performance-warns")]

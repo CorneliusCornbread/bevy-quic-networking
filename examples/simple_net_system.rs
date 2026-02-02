@@ -1,5 +1,7 @@
-use std::{net::SocketAddr, path::Path};
-
+/// This is a simple example showing how to utilize both the client and server components
+/// to connect and send data between endpoints. This example puts both the client and server
+/// in one ECS world but this would function all the same between two different instances of
+/// Bevy.
 use bevy::{
     DefaultPlugins,
     app::{App, PostUpdate, Startup, Update},
@@ -34,6 +36,7 @@ use bevy_quic_networking::{
     },
 };
 use s2n_quic::client::Connect;
+use std::{net::SocketAddr, path::Path};
 
 fn main() {
     let _app = App::new()
@@ -50,7 +53,9 @@ fn main() {
                 ..Default::default()
             }),
         )
+        // These are the default plugins, they do not include the Aeronet functionality
         .add_plugins(QuicDefaultPlugins)
+        // These plugins can be skipped however they make for easy debugging and viewing of state of the ECS world
         .add_plugins(RemotePlugin::default())
         .add_plugins(RemoteHttpPlugin::default())
         .add_systems(Startup, setup)
@@ -71,9 +76,16 @@ fn main() {
         .run();
 }
 
+/// Server address we want to connect to
 const IP: &str = "127.0.0.1:7777";
 
 fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
+    // We need to load our certs and keys to make a proper connection.
+    // QUIC requires TLS to function, there's ways to make insecure
+    // connections with s2n-quic but it's genuinely easier to use
+    // test certs.
+
+    // REMEMBER TO USE DIFFERENT CERTS IN A PRODUCTION ENVIRONMENT!!
     let cert_str_path = format!("{}/examples/certs/cert.pem", env!("CARGO_MANIFEST_DIR"));
     let cert_path = Path::new(&cert_str_path);
 
@@ -82,11 +94,13 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
 
     let ip: SocketAddr = IP.parse().unwrap();
     info!("IP set to: {}", ip);
+    // Spawn a new server with our given cert and private key
     let server_comp = QuicServer::bind(&runtime, ip, cert_path, key_path)
         .expect("Unable to bind to server address");
 
     commands.spawn(server_comp);
 
+    // Spawn a new client with our cert
     let mut client_comp = QuicClient::new_with_tls(&runtime, cert_path).expect("Invalid cert");
     let connect = Connect::new(ip).with_server_name("localhost");
     let conn_bundle = client_comp.open_connection(connect);
@@ -104,6 +118,9 @@ fn client_open_stream(
     mut commands: Commands,
     connection_query: Query<(Entity, &mut QuicClientConnection), Without<Children>>,
 ) {
+    // As soon as we see a connection without any children,
+    // attempt to spawn a bidirectional stream on the client end.
+    // Both servers and clients may open streams.
     for (entity, mut connection) in connection_query {
         let stream_bundle = connection.open_bidrectional_stream();
         commands.spawn((stream_bundle, DebugCount(0), ChildOf(entity)));
@@ -111,6 +128,8 @@ fn client_open_stream(
 }
 
 fn client_send(client_streams: Query<(&mut QuicClientSendStream, &mut DebugCount)>) {
+    // As soon as we see an open client stream send a message when this system is run
+    // (only when spacebar is pressed)
     for (mut send_stream, mut debug_count) in client_streams {
         let res = send_stream.send("Yippieee".into());
         if let Err(e) = res {
@@ -124,6 +143,7 @@ fn client_send(client_streams: Query<(&mut QuicClientSendStream, &mut DebugCount
     }
 }
 
+// Keeps track of the number of messages sent and received
 fn add_debug(
     mut commands: Commands,
     query: Query<(Entity, &QuicServerReceiveStream), Without<DebugCount>>,
@@ -133,6 +153,8 @@ fn add_debug(
     }
 }
 
+// Output our current message count with the data of the message itself.
+// Also log any outstanding errors from our receive stream.
 fn debug_receive(
     server_receivers: Query<(&mut QuicServerReceiveStream, &mut DebugCount)>,
     client_receivers: Query<&mut QuicClientReceiveStream>,
@@ -144,7 +166,7 @@ fn debug_receive(
             continue;
         }
 
-        if let Some(data) = stream.poll_recv() {
+        if let Some(data) = stream.recv() {
             let bytes = data.payload;
             let string = String::from_utf8_lossy(&bytes);
             info!("Received message: '{}'", string);
@@ -160,6 +182,7 @@ fn debug_receive(
     }
 }
 
+// Log any outstanding errors from our streams
 fn debug_send(
     server_receivers: Query<&mut QuicServerSendStream>,
     client_receivers: Query<&mut QuicClientSendStream>,
