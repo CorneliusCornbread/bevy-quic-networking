@@ -1,10 +1,10 @@
-use aeronet_io::{Session, connection::Disconnected};
+use aeronet_io::{
+    Session,
+    connection::{Disconnect, Disconnected},
+};
 use bevy::{
-    app::{Plugin, PostUpdate, PreUpdate},
-    ecs::{
-        entity::Entity,
-        system::{Command, Commands},
-    },
+    app::{Plugin, PostUpdate, PreUpdate, Startup},
+    ecs::{entity::Entity, observer::On, system::Commands, world::World},
 };
 use std::time::Instant;
 
@@ -21,6 +21,8 @@ use bevy::{
 const MIN_MTU: usize = 1200;
 const MAX_PACKET_TRANSFER: usize = 512;
 const PACKET_WARN_THRESH: usize = 400;
+
+const AERONET_DISCONNECT_CODE: u32 = 12345;
 
 #[derive(Component, Default)]
 #[require(Session::new(Instant::now(), MIN_MTU))]
@@ -59,7 +61,8 @@ impl Plugin for QuicAeronetEventPlugin {
                 fire_client_send_disconnect_events,
                 fire_client_rec_disconnect_events,
             ),
-        );
+        )
+        .add_systems(Startup, add_disconnect_handler);
     }
 }
 
@@ -164,4 +167,38 @@ fn fire_disconnect(cmd: &mut Commands, entity: Entity, reason: StreamDisconnectR
         entity,
         reason: reason.into(),
     });
+}
+
+fn add_disconnect_handler(world: &mut World) {
+    world.add_observer(
+        |event: On<Disconnect>,
+         server_rec_query: Query<(&mut QuicServerReceiveStream, Entity)>,
+         server_send_query: Query<(&mut QuicServerSendStream, Entity)>,
+         client_rec_query: Query<(&mut QuicClientReceiveStream, Entity)>,
+         client_send_query: Query<(&mut QuicClientSendStream, Entity)>| {
+            for (mut stream, entity) in server_rec_query {
+                if entity == event.entity {
+                    stream.stop_send(AERONET_DISCONNECT_CODE.into());
+                }
+            }
+
+            for (mut stream, entity) in client_rec_query {
+                if entity == event.entity {
+                    stream.stop_send(AERONET_DISCONNECT_CODE.into());
+                }
+            }
+
+            for (mut stream, entity) in client_send_query {
+                if entity == event.entity {
+                    stream.close();
+                }
+            }
+
+            for (mut stream, entity) in server_send_query {
+                if entity == event.entity {
+                    stream.close();
+                }
+            }
+        },
+    );
 }
