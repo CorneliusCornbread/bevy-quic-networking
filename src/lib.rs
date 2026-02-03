@@ -4,10 +4,6 @@ pub mod plugin;
 pub mod server;
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
-pub use s2n_quic::Server;
-
-// Re-exports
-pub use s2n_quic::client::Client;
 
 use crate::{
     common::{
@@ -21,6 +17,8 @@ use crate::{
     server::accepter::SimpleServerAccepterPlugin,
 };
 
+/// The default set of plugins needed to make the Bevy Quic components
+/// function and handle errors and connection attempts.
 pub struct QuicDefaultPlugins;
 
 impl PluginGroup for QuicDefaultPlugins {
@@ -33,6 +31,7 @@ impl PluginGroup for QuicDefaultPlugins {
     }
 }
 
+/// The plugin group for Aeronet event handling.
 pub struct QuicAeronetPlugins;
 
 impl PluginGroup for QuicAeronetPlugins {

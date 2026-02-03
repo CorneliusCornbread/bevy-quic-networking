@@ -22,8 +22,13 @@ const MIN_MTU: usize = 1200;
 const MAX_PACKET_TRANSFER: usize = 512;
 const PACKET_WARN_THRESH: usize = 400;
 
-const AERONET_DISCONNECT_CODE: u32 = 12345;
+/// The disconnect code which will be sent by QUIC when a disconnect is called
+/// via the [Disconnect](https://docs.rs/aeronet_io/latest/aeronet_io/connection/struct.Disconnect.html)
+/// event on any ReceiveStream.
+pub const AERONET_DISCONNECT_CODE: u32 = 12345;
 
+/// The component which is added once a stream of any kind has been
+/// successfully made.
 #[derive(Component, Default)]
 #[require(Session::new(Instant::now(), MIN_MTU))]
 pub struct QuicSession;
@@ -41,6 +46,8 @@ pub struct QuicSession;
 //
 // The IO layer is a couple hundred lines of code, you may consume
 // mine weiner if this is upsetting to you. - Cornelius
+/// The plugin which handles pushing and draining packets to and from the [Session](https://docs.rs/aeronet_io/latest/aeronet_io/struct.Session.html)
+/// packet buffers.
 pub struct QuicAeronetPacketPlugin;
 
 impl Plugin for QuicAeronetPacketPlugin {
@@ -49,6 +56,10 @@ impl Plugin for QuicAeronetPacketPlugin {
     }
 }
 
+/// The plugin which handles sending and receiving the [Disconnect](https://docs.rs/aeronet_io/latest/aeronet_io/connection/struct.Disconnect.html)
+/// and [Disconnected](https://docs.rs/aeronet_io/latest/aeronet_io/connection/struct.Disconnected.html) events.
+/// Disconnects triggered via the [Disconnect](https://docs.rs/aeronet_io/latest/aeronet_io/connection/struct.Disconnect.html)
+/// event will use the default
 pub struct QuicAeronetEventPlugin;
 
 impl Plugin for QuicAeronetEventPlugin {

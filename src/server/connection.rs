@@ -27,6 +27,7 @@ pub struct QuicServerConnection {
     connection: QuicConnection,
 }
 
+// TODO: add open bidirectional stream and unidirectional stream functions
 impl QuicServerConnection {
     pub fn new(runtime: Handle, connection: Connection) -> Self {
         Self {
@@ -36,5 +37,16 @@ impl QuicServerConnection {
 
     pub(crate) fn from_connection(connection: QuicConnection) -> Self {
         QuicServerConnection { connection }
+    }
+
+    /// Returns true if the connection is still open.
+    pub fn is_open(&mut self) -> bool {
+        self.connection.is_open()
+    }
+
+    /// Gets the disconnect reason if the stream has closed.
+    /// Returns `None` if the stream is still open.
+    pub fn get_disconnect_reason(&mut self) -> Option<ConnectionError> {
+        self.connection.get_disconnect_reason()
     }
 }

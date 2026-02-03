@@ -21,7 +21,6 @@ use crate::common::{
     },
 };
 
-pub mod disconnect;
 pub mod id;
 pub mod plugin;
 pub mod runtime;
@@ -95,6 +94,28 @@ impl QuicConnection {
 
     pub(crate) fn generate_stream_id(&mut self) -> StreamId {
         self.id_gen.generate_id()
+    }
+
+    /// Returns true if the connection is still open.
+    pub fn is_open(&mut self) -> bool {
+        let res = self.connection.try_lock();
+
+        match res {
+            Ok(mut lock) => lock.ping().is_ok(),
+            Err(_e) => true, // If our lock is busy... eh... just assume we're open.
+        }
+    }
+
+    /// Gets the disconnect reason if the stream has closed.
+    /// Returns `None` if the stream is still open.
+    pub fn get_disconnect_reason(&mut self) -> Option<ConnectionError> {
+        let res = self.connection.try_lock();
+
+        if let Err(_e) = res {
+            return None;
+        }
+
+        res.unwrap().ping().err()
     }
 }
 

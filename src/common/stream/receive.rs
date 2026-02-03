@@ -28,6 +28,7 @@ const INBOUND_CHANNEL_SIZE: usize = 128;
 /// How big the receive buffer of Bytes chunks we can receive at once is to be sent to Bevy
 const INBOUND_BUFF_SIZE: usize = 64;
 
+/// Internal structure for handling receive logic.
 pub struct QuicReceiveStream {
     task_state: StreamTaskState,
     inbound_data: Receiver<RecvPacket>,
@@ -88,6 +89,9 @@ impl QuicReceiveStream {
         !self.task_state.is_finished()
     }
 
+    /// Notifies the peer to stop sending data on the stream.
+    ///
+    /// This requests the peer to finish the stream as soon as possible by issuing a reset with the provided error_code.
     pub fn stop_send(&mut self, err_code: ErrorCode) {
         let Err(_e) = self
             .inbound_control
