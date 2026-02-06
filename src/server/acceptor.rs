@@ -19,19 +19,22 @@ use crate::{
     },
 };
 
+/// This plugin makes servers automatically accept all incoming
+/// connections and streams and spawns them as components parented
+/// to their [QuicServer]s and [QuicServerConnection]s in the ECS world.
 #[derive(Debug)]
-pub struct SimpleServerAccepterPlugin;
+pub struct SimpleServerAcceptorPlugin;
 
-impl Plugin for SimpleServerAccepterPlugin {
+impl Plugin for SimpleServerAcceptorPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.add_systems(Update, accept_connections)
             .add_systems(Update, accept_streams);
     }
 }
 
-pub fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServer, Entity)>) {
+fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServer, Entity)>) {
     for (mut server, entity) in servers {
-        let res = server.poll_connection();
+        let res = server.accept_connection();
 
         if let Err(e) = res {
             error!("Error handling server connection: {}", e);

@@ -6,6 +6,7 @@ pub mod server;
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 
 use crate::{
+    client::acceptor::SimpleClientAcceptorPlugin,
     common::{
         connection::plugin::ConnectionAttemptPlugin,
         stream::{
@@ -14,7 +15,7 @@ use crate::{
         },
     },
     plugin::QuicAsyncPlugin,
-    server::accepter::SimpleServerAccepterPlugin,
+    server::acceptor::SimpleServerAcceptorPlugin,
 };
 
 /// The default set of plugins needed to make the Bevy Quic components
@@ -27,7 +28,8 @@ impl PluginGroup for QuicDefaultPlugins {
             .add(QuicAsyncPlugin::default())
             .add(ConnectionAttemptPlugin)
             .add(StreamAttemptPlugin)
-            .add(SimpleServerAccepterPlugin)
+            .add(SimpleServerAcceptorPlugin)
+            .add(SimpleClientAcceptorPlugin)
     }
 }
 

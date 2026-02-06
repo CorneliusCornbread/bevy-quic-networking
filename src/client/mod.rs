@@ -17,6 +17,7 @@ use crate::{
     },
 };
 
+pub mod acceptor;
 pub mod connection;
 pub mod marker;
 pub mod stream;
@@ -55,6 +56,7 @@ impl QuicClient {
         Ok(ret)
     }
 
+    /// Opens a new connection to the given `connect` target. Returns an attempt and an ID assigned to the connection.
     pub fn open_connection(
         &mut self,
         connect: Connect,

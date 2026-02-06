@@ -13,11 +13,14 @@ use crate::{
     server::{connection::QuicServerConnection, marker::QuicServerMarker},
 };
 
-pub mod accepter;
+pub mod acceptor;
 pub mod connection;
 pub mod marker;
 pub mod stream;
 
+/// The component which manages an instance of a QuicServer.
+///
+/// It is recommended you parent any [QuicServerConnection] to their related QuicServer entity.
 #[derive(Component)]
 #[require(QuicServerMarker)]
 pub struct QuicServer {
@@ -27,6 +30,10 @@ pub struct QuicServer {
 }
 
 impl QuicServer {
+    /// Creates a new QuicServer and binds it to the given address with the given certificates.
+    ///
+    /// QUIC requires some form of TLS certificate, this function accepts the same kinds of certs the regular s2n-quic
+    /// `bind()` function does.
     pub fn bind<C: IntoCertificate, PK: IntoPrivateKey>(
         runtime: &TokioRuntime,
         bind_ip: SocketAddr,
@@ -45,7 +52,11 @@ impl QuicServer {
         })
     }
 
-    pub fn poll_connection(&mut self) -> Result<ConnectionPoll, JoinError> {
+    /// Polls to receive any new pending connections from the async thread.
+    ///
+    /// The async thread will automatically accept any pending connections.
+    /// It will then put them in a queue which is processed by this function.
+    pub fn accept_connection(&mut self) -> Result<ConnectionPoll, JoinError> {
         let waker = Arc::new(futures::task::noop_waker_ref());
         let mut cx = std::task::Context::from_waker(&waker);
 
