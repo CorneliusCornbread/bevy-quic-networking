@@ -38,7 +38,7 @@ fn server_connection_attempt(
     for entity_bundle in query {
         let (entity, mut attempt, id) = entity_bundle;
 
-        let res = attempt.get_output();
+        let res = attempt.attempt_result();
 
         if let Err(e) = res {
             match e {
@@ -97,7 +97,7 @@ fn client_connection_attempt(
     for entity_bundle in query {
         let (entity, mut attempt, id) = entity_bundle;
 
-        let res = attempt.get_output();
+        let res = attempt.attempt_result();
 
         if let Err(e) = res {
             match e {

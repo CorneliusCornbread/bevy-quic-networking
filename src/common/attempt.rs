@@ -23,7 +23,7 @@ impl<T> QuicActionAttempt<T> {
         }
     }
 
-    pub fn get_output(&mut self) -> Result<T, QuicActionError> {
+    pub fn attempt_result(&mut self) -> Result<T, QuicActionError> {
         if let Some(e) = &self.last_error {
             return Err(e.clone());
         }

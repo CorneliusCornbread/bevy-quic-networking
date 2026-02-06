@@ -15,12 +15,12 @@ pub mod session;
 pub mod task_state;
 
 #[derive(Deref, DerefMut)]
-pub struct QuicReceiveStreamAttempt(QuicActionAttempt<QuicReceiveStream>);
+pub struct QuicReceiveStreamAttempt(QuicActionAttempt<Option<QuicReceiveStream>>);
 
 impl QuicReceiveStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: JoinHandle<Result<QuicReceiveStream, s2n_quic::connection::Error>>,
+        conn_task: JoinHandle<Result<Option<QuicReceiveStream>, s2n_quic::connection::Error>>,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task))
     }

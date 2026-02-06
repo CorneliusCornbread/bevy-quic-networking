@@ -6,7 +6,13 @@ use s2n_quic::{Connection, connection::Error as ConnectionError, stream::PeerStr
 use tokio::{runtime::Handle, task::JoinHandle};
 
 use crate::{
-    client::{marker::QuicClientMarker, stream::QuicClientBidirectionalStreamAttempt},
+    client::{
+        marker::QuicClientMarker,
+        stream::{
+            QuicClientBidirectionalStreamAttempt, QuicClientReceiveStream,
+            QuicClientSendStreamAttempt,
+        },
+    },
     common::{
         connection::{QuicConnection, QuicConnectionAttempt, StreamPollError},
         stream::id::StreamId,
@@ -41,7 +47,6 @@ impl QuicClientConnection {
         Self { connection }
     }
 
-    // TODO: add default system to accept all incoming streams for clients
     /// Called to accept any pending streams manually. Should only be done
     /// if you're using a plugin setup which doesn't use the default accepters.
     pub fn accept_streams(&mut self) -> Result<(PeerStream, StreamId), StreamPollError> {
@@ -57,7 +62,15 @@ impl QuicClientConnection {
         )
     }
 
-    // TODO: add open unidirectional stream function
+    pub fn open_send_stream(&mut self) -> (QuicClientSendStreamAttempt, StreamId) {
+        todo!()
+    }
+
+    pub fn accept_receive_stream(&mut self) -> Option<(QuicClientReceiveStream, StreamId)> {
+        let rec = self.connection.accept_receive_stream();
+
+        todo!()
+    }
 
     /// Returns true if the connection is still open.
     pub fn is_open(&mut self) -> bool {

@@ -12,8 +12,8 @@ use crate::{
         attempt::QuicActionError,
         connection::BidirectionalSessionAttempt,
         stream::{
+            QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt, QuicSendStreamAttempt,
             id::StreamId, receive::QuicReceiveStream, send::QuicSendStream,
-            QuicBidirectionalStreamAttempt,
         },
     },
 };
@@ -33,12 +33,32 @@ impl QuicClientBidirectionalStreamAttempt {
         Self(QuicBidirectionalStreamAttempt::new(handle, conn_task))
     }
 
-    pub fn get_output(&mut self) -> Result<(QuicReceiveStream, QuicSendStream), QuicActionError> {
-        self.0.get_output()
+    pub fn attempt_result(
+        &mut self,
+    ) -> Result<(QuicReceiveStream, QuicSendStream), QuicActionError> {
+        self.0.attempt_result()
     }
 
     pub(crate) fn from_session_attempt(attempt: BidirectionalSessionAttempt) -> (Self, StreamId) {
         (Self(attempt.0), attempt.1)
+    }
+}
+
+#[derive(Component)]
+#[require(QuicClientMarker)]
+#[require(SessionEndpoint)]
+pub struct QuicClientSendStreamAttempt(QuicSendStreamAttempt);
+
+impl QuicClientSendStreamAttempt {
+    pub fn new(
+        handle: Handle,
+        conn_task: JoinHandle<Result<QuicSendStream, s2n_quic::connection::Error>>,
+    ) -> Self {
+        Self(QuicSendStreamAttempt::new(handle, conn_task))
+    }
+
+    pub fn attempt_result(&mut self) -> Result<QuicSendStream, QuicActionError> {
+        self.0.attempt_result()
     }
 }
 

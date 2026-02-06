@@ -1,5 +1,3 @@
-use std::{error::Error, sync::Arc};
-
 use bevy::{
     log::warn,
     prelude::{Deref, DerefMut},
@@ -7,14 +5,15 @@ use bevy::{
 use s2n_quic::{
     Connection,
     connection::Error as ConnectionError,
-    stream::{BidirectionalStream, PeerStream},
+    stream::{BidirectionalStream, PeerStream, ReceiveStream},
 };
-use tokio::{runtime::Handle, sync::Mutex, task::JoinHandle};
+use std::{error::Error, sync::Arc, time::Duration};
+use tokio::{runtime::Handle, sync::Mutex, task::JoinHandle, time::timeout};
 
 use crate::common::{
     attempt::QuicActionAttempt,
     stream::{
-        QuicBidirectionalStreamAttempt,
+        QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt,
         id::{StreamId, StreamIdGenerator},
         receive::QuicReceiveStream,
         send::QuicSendStream,
@@ -45,6 +44,7 @@ pub struct QuicConnection {
 }
 
 pub(crate) struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
+pub(crate) struct ReceiveSessionAttempt(pub QuicReceiveStreamAttempt, pub StreamId);
 
 impl QuicConnection {
     pub(crate) fn new(runtime: Handle, mut connection: Connection) -> Self {
@@ -88,6 +88,17 @@ impl QuicConnection {
 
         BidirectionalSessionAttempt(
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), conn_task),
+            self.generate_stream_id(),
+        )
+    }
+
+    pub(crate) fn accept_receive_stream(&mut self) -> ReceiveSessionAttempt {
+        let conn_task = self
+            .runtime
+            .spawn(accept_receive_task(self.connection.clone()));
+
+        ReceiveSessionAttempt(
+            QuicReceiveStreamAttempt::new(self.runtime.clone(), conn_task),
             self.generate_stream_id(),
         )
     }
@@ -136,6 +147,37 @@ async fn open_bidirectional_task(
     let rec_stream = QuicReceiveStream::new(Handle::current(), rec);
 
     Ok((rec_stream, send_stream))
+}
+
+async fn accept_receive_task(
+    conn: Arc<Mutex<Connection>>,
+) -> Result<Option<QuicReceiveStream>, ConnectionError> {
+    let rec_stream_res: Result<Option<ReceiveStream>, ConnectionError>;
+
+    {
+        let mut conn = conn.lock().await;
+
+        rec_stream_res = match timeout(Duration::from_millis(1), conn.accept_receive_stream()).await
+        {
+            Ok(res) => res,
+            Err(_e) => Ok(None),
+        }
+    }
+
+    if let Err(e) = rec_stream_res {
+        return Err(e);
+    }
+
+    let opt = rec_stream_res.unwrap();
+
+    if let None = opt {
+        return Ok(None);
+    }
+
+    let stream = opt.unwrap();
+    let quic_rec_stream = QuicReceiveStream::new(Handle::current(), stream);
+
+    Ok(Some(quic_rec_stream))
 }
 
 #[derive(Debug)]

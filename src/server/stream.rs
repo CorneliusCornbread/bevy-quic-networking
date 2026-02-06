@@ -30,7 +30,7 @@ impl QuicServerBidirectionalStreamAttempt {
     }
 
     pub fn get_output(&mut self) -> Result<(QuicReceiveStream, QuicSendStream), QuicActionError> {
-        self.0.get_output()
+        self.0.attempt_result()
     }
 }
 
