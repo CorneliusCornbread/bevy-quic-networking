@@ -24,6 +24,8 @@ pub mod id;
 pub mod plugin;
 pub mod runtime;
 
+const CONNECTION_CHANNEL_SIZE: u64 = 1024;
+
 #[derive(Deref, DerefMut)]
 pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
 
