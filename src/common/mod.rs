@@ -15,6 +15,7 @@ pub mod attempt;
 pub mod connection;
 pub mod status_code;
 pub mod stream;
+pub(crate) mod task_state;
 
 // TODO: Move connect, stream information, and data information into their own enums
 #[derive(Debug)]

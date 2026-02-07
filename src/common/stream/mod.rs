@@ -1,5 +1,5 @@
 use bevy::prelude::{Deref, DerefMut};
-use tokio::{runtime::Handle, task::JoinHandle};
+use tokio::{runtime::Handle, sync::oneshot, task::JoinHandle};
 
 use crate::common::{
     attempt::QuicActionAttempt,
@@ -39,15 +39,19 @@ impl QuicSendStreamAttempt {
 }
 
 #[derive(Deref, DerefMut)]
-pub struct QuicBidirectionalStreamAttempt(QuicActionAttempt<(QuicReceiveStream, QuicSendStream)>);
+pub struct QuicBidirectionalStreamAttempt {
+    stream_oneshot:
+        oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), s2n_quic::connection::Error>>,
+}
 
 impl QuicBidirectionalStreamAttempt {
     pub fn new(
-        handle: Handle,
-        conn_task: JoinHandle<
+        conn_data: oneshot::Receiver<
             Result<(QuicReceiveStream, QuicSendStream), s2n_quic::connection::Error>,
         >,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task))
+        Self {
+            stream_oneshot: conn_data,
+        }
     }
 }

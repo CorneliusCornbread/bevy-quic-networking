@@ -7,6 +7,8 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 
+// TODO: make action attempt take two generic variables one of which is a trait impl for the JoinHandle
+// to abstract over both JoinHandle and oneshot::Receiver
 pub struct QuicActionAttempt<T> {
     runtime: Handle,
     conn_task: Option<JoinHandle<Result<T, ConnectionError>>>,

@@ -8,10 +8,16 @@ use s2n_quic::{
     stream::{BidirectionalStream, PeerStream, ReceiveStream},
 };
 use std::{error::Error, sync::Arc, time::Duration};
-use tokio::{runtime::Handle, sync::Mutex, task::JoinHandle, time::timeout};
+use tokio::{
+    runtime::Handle,
+    sync::{Mutex, mpsc, oneshot},
+    task::JoinHandle,
+    time::timeout,
+};
 
 use crate::common::{
     attempt::QuicActionAttempt,
+    connection::{disconnect::ConnectionDisconnectReason, task_state::ConnectionTaskState},
     stream::{
         QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt,
         id::{StreamId, StreamIdGenerator},
@@ -20,11 +26,25 @@ use crate::common::{
     },
 };
 
+pub mod disconnect;
 pub mod id;
 pub mod plugin;
 pub mod runtime;
+pub mod task_state;
 
-const CONNECTION_CHANNEL_SIZE: u64 = 1024;
+const CONNECTION_CHANNEL_SIZE: usize = 1024;
+
+enum ConnectionCommand {
+    OpenBidirectional {
+        respond_to: oneshot::Sender<Result<(QuicReceiveStream, QuicSendStream), ConnectionError>>,
+    },
+    OpenSend {
+        respond_to: oneshot::Sender<Result<QuicSendStream, ConnectionError>>,
+    },
+    AcceptReceive {
+        respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, ConnectionError>>,
+    },
+}
 
 #[derive(Deref, DerefMut)]
 pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
@@ -38,19 +58,21 @@ impl QuicConnectionAttempt {
     }
 }
 
-#[derive(Debug)]
-pub struct QuicConnection {
-    runtime: Handle,
-    connection: Arc<Mutex<Connection>>,
-    id_gen: StreamIdGenerator,
-}
-
 pub(crate) struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
 pub(crate) struct ReceiveSessionAttempt(pub QuicReceiveStreamAttempt, pub StreamId);
+
+#[derive(Debug)]
+pub struct QuicConnection {
+    task_state: ConnectionTaskState,
+    conn_command_channel: mpsc::Sender<ConnectionCommand>,
+    id_gen: StreamIdGenerator,
+}
 
 impl QuicConnection {
     pub(crate) fn new(runtime: Handle, mut connection: Connection) -> Self {
         let res = connection.keep_alive(true);
+
+        let (send, rec) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
 
         if let Err(e) = res {
             warn!(
@@ -59,15 +81,19 @@ impl QuicConnection {
             )
         }
 
+        let handle = runtime.spawn(connection_task(connection, rec));
+
         Self {
-            runtime,
-            connection: Arc::new(Mutex::new(connection)),
+            task_state: ConnectionTaskState::new(runtime, handle),
+            conn_command_channel: send,
             id_gen: Default::default(),
         }
     }
 
     pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, StreamId), StreamPollError> {
-        let waker = Arc::new(futures::task::noop_waker_ref());
+        todo!()
+
+        /* let waker = Arc::new(futures::task::noop_waker_ref());
         let mut cx = std::task::Context::from_waker(&waker);
 
         let mut lock = self.connection.try_lock()?;
@@ -80,29 +106,42 @@ impl QuicConnection {
             return Ok((stream, self.id_gen.generate_id()));
         }
 
-        Err(StreamPollError::None)
+        Err(StreamPollError::None) */
     }
 
     pub(crate) fn open_bidrectional_stream(&mut self) -> BidirectionalSessionAttempt {
-        let conn_task = self
+        let (send, rec) = oneshot::channel();
+
+        let cmd = ConnectionCommand::OpenBidirectional { respond_to: send };
+
+        let attempt = BidirectionalSessionAttempt(
+            QuicBidirectionalStreamAttempt::new(rec),
+            self.generate_stream_id(),
+        );
+
+        todo!()
+
+        /* let conn_task = self
             .runtime
             .spawn(open_bidirectional_task(self.connection.clone()));
 
         BidirectionalSessionAttempt(
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), conn_task),
             self.generate_stream_id(),
-        )
+        ) */
     }
 
     pub(crate) fn accept_receive_stream(&mut self) -> ReceiveSessionAttempt {
-        let conn_task = self
+        todo!()
+
+        /* let conn_task = self
             .runtime
             .spawn(accept_receive_task(self.connection.clone()));
 
         ReceiveSessionAttempt(
             QuicReceiveStreamAttempt::new(self.runtime.clone(), conn_task),
             self.generate_stream_id(),
-        )
+        ) */
     }
 
     pub(crate) fn generate_stream_id(&mut self) -> StreamId {
@@ -111,36 +150,44 @@ impl QuicConnection {
 
     /// Returns true if the connection is still open.
     pub fn is_open(&mut self) -> bool {
-        let res = self.connection.try_lock();
+        todo!()
+
+        /* let res = self.connection.try_lock();
 
         match res {
             Ok(mut lock) => lock.ping().is_ok(),
             Err(_e) => true, // If our lock is busy... eh... just assume we're open.
-        }
+        } */
     }
 
     /// Gets the disconnect reason if the stream has closed.
     /// Returns `None` if the stream is still open.
     pub fn get_disconnect_reason(&mut self) -> Option<ConnectionError> {
-        let res = self.connection.try_lock();
+        todo!();
+
+        /* let res = self.connection.try_lock();
 
         if let Err(_e) = res {
             return None;
         }
 
-        res.unwrap().ping().err()
+        res.unwrap().ping().err() */
     }
 }
 
+async fn connection_task(
+    conn: Connection,
+    cmd_rec: mpsc::Receiver<ConnectionCommand>,
+) -> ConnectionDisconnectReason {
+    todo!()
+}
+
 async fn open_bidirectional_task(
-    conn: Arc<Mutex<Connection>>,
+    mut conn: Connection,
 ) -> Result<(QuicReceiveStream, QuicSendStream), ConnectionError> {
     let bi_stream_res: Result<BidirectionalStream, ConnectionError>;
 
-    {
-        let mut conn = conn.lock().await;
-        bi_stream_res = conn.open_bidirectional_stream().await;
-    }
+    bi_stream_res = conn.open_bidirectional_stream().await;
 
     let bi_stream = bi_stream_res?;
     let (rec, send) = bi_stream.split();

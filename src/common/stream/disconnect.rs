@@ -18,6 +18,12 @@ pub enum StreamDisconnectReason {
     NoReason,
 }
 
+impl From<Arc<dyn Error + Send + Sync>> for StreamDisconnectReason {
+    fn from(error: Arc<dyn Error + Send + Sync>) -> Self {
+        StreamDisconnectReason::InternalError(error)
+    }
+}
+
 impl From<StreamDisconnectReason> for DisconnectReason {
     fn from(val: StreamDisconnectReason) -> Self {
         match val {
