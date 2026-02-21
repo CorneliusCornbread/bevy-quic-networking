@@ -1,65 +1,91 @@
-use std::{sync::Arc, time::SystemTime};
+use std::{error::Error, mem, sync::Arc, time::SystemTime};
 
 use bevy::ecs::component::Component;
 use s2n_quic::connection::Error as ConnectionError;
 use tokio::{
     runtime::Handle,
+    sync::oneshot,
     task::{JoinError, JoinHandle},
 };
 
-// TODO: make action attempt take two generic variables one of which is a trait impl for the JoinHandle
-// to abstract over both JoinHandle and oneshot::Receiver
-pub struct QuicActionAttempt<T> {
-    runtime: Handle,
-    conn_task: Option<JoinHandle<Result<T, ConnectionError>>>,
-    /// In the event that we have a failure with tokio, we store the error data here
-    last_error: Option<QuicActionError>,
+pub trait TaskResult<T>: Send {
+    fn resolve_result(
+        &mut self,
+        handle: &Handle,
+    ) -> Option<Result<T, Box<dyn Error + Send + Sync>>>;
 }
 
-impl<T> QuicActionAttempt<T> {
-    pub(crate) fn new(handle: Handle, conn_task: JoinHandle<Result<T, ConnectionError>>) -> Self {
-        Self {
-            runtime: handle,
-            conn_task: Some(conn_task),
-            last_error: None,
+impl<T: Send> TaskResult<T> for oneshot::Receiver<T> {
+    fn resolve_result(
+        &mut self,
+        _handle: &Handle,
+    ) -> Option<Result<T, Box<dyn Error + Send + Sync>>> {
+        if self.is_empty() {
+            return None;
+        }
+
+        match self.try_recv() {
+            Ok(out) => Some(Ok(out)),
+            Err(e) => Some(Err(Box::new(e))),
         }
     }
+}
 
-    pub fn attempt_result(&mut self) -> Result<T, QuicActionError> {
-        if let Some(e) = &self.last_error {
-            return Err(e.clone());
+impl<T: Send> TaskResult<T> for JoinHandle<T> {
+    fn resolve_result(
+        &mut self,
+        handle: &Handle,
+    ) -> Option<Result<T, Box<dyn Error + Send + Sync>>> {
+        if !self.is_finished() {
+            return None;
         }
 
-        let join_handle_res = self.conn_task.as_mut();
-
-        if join_handle_res.is_none() {
-            return Err(QuicActionError::Consumed);
+        match handle.block_on(self) {
+            Ok(out) => Some(Ok(out)),
+            Err(e) => Some(Err(Box::new(e))),
         }
+    }
+}
 
-        let join_handle = join_handle_res.unwrap();
+#[derive(Debug)]
+enum ActionPoll<T, A: TaskResult<T>> {
+    /// Task is still running
+    Pending(A),
+    /// Task completed successfully
+    Completed(T),
+    /// Task failed with an error
+    Failed(Box<dyn Error + Send + Sync>),
+    /// Invalid state, only used for moving between states
+    Invalid,
+}
 
-        if !join_handle.is_finished() {
-            return Err(QuicActionError::InProgress);
-        }
+pub(crate) struct QuicActionAttempt<T, A: TaskResult<T>> {
+    pub(crate) runtime: Handle,
+    pub(crate) action_state: ActionPoll<T, A>,
+}
 
-        let join_res = self.runtime.block_on(join_handle);
+impl<T, A: TaskResult<T>> QuicActionAttempt<T, A> {
+    fn attempt_result(&mut self) -> Result<T, QuicActionError> {
+        let mut state: ActionPoll<T, A> = ActionPoll::Invalid;
 
-        if let Err(e) = join_res {
-            let err_arc = Arc::new(e);
-            let creation_err = QuicActionError::Crashed(err_arc.clone());
-            self.last_error = Some(creation_err.clone());
-            return Err(creation_err);
-        }
+        mem::swap(&mut state, &mut self.action_state);
 
-        let res = join_res.unwrap();
+        match state {
+            ActionPoll::Pending(ref mut poll) => {
+                let out = poll.resolve_result(&self.runtime);
 
-        if let Err(e) = res {
-            let creation_err = QuicActionError::Failed(e);
-            self.last_error = Some(creation_err.clone());
-            return Err(creation_err);
-        }
+                if out.is_none() {
+                    // Swap memory back
+                    mem::swap(&mut state, &mut self.action_state);
+                    return Err(QuicActionError::InProgress);
+                }
+            }
+            ActionPoll::Completed(_) => todo!(),
+            ActionPoll::Failed(error) => todo!(),
+            ActionPoll::Invalid => todo!(),
+        };
 
-        Ok(res.unwrap())
+        todo!()
     }
 }
 
