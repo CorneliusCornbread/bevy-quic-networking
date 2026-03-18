@@ -48,7 +48,7 @@ fn server_connection_attempt(
                 QuicActionError::Consumed => {
                     info!("Already consumed connection attempt hasn't been cleaned up: {entity}");
                 }
-                QuicActionError::Failed(error) => {
+                QuicActionError::ConnectionFailed(error) => {
                     error!("Error handling connection attempt: {:?}", error)
                 }
                 QuicActionError::Crashed(ref join_error) => {
@@ -107,7 +107,7 @@ fn client_connection_attempt(
                 QuicActionError::Consumed => {
                     info!("Already consumed connection attempt hasn't been cleaned up: {entity}");
                 }
-                QuicActionError::Failed(error) => {
+                QuicActionError::ConnectionFailed(error) => {
                     error!("Error handling connection attempt: {:?}", error)
                 }
                 QuicActionError::Crashed(ref join_error) => {

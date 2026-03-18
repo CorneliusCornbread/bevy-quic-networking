@@ -47,7 +47,7 @@ fn client_bidir_stream_attempt(
                 QuicActionError::Consumed => {
                     error!("Stream attempt consumed for entity: {:?}", entity)
                 }
-                QuicActionError::Failed(error) => {
+                QuicActionError::ConnectionFailed(error) => {
                     error!("Stream attempt failed: {:?}", error)
                 }
                 QuicActionError::Crashed(join_error) => {
@@ -102,7 +102,7 @@ fn server_bidir_stream_attempt(
                 QuicActionError::Consumed => {
                     error!("Stream attempt consumed for entity: {:?}", entity)
                 }
-                QuicActionError::Failed(error) => {
+                QuicActionError::ConnectionFailed(error) => {
                     error!("Stream attempt failed: {:?}", error)
                 }
                 QuicActionError::Crashed(join_error) => {

@@ -1,100 +1,115 @@
-use std::{error::Error, mem, sync::Arc, time::SystemTime};
+use std::{error::Error, sync::Arc, time::SystemTime};
 
 use bevy::ecs::component::Component;
 use s2n_quic::connection::Error as ConnectionError;
+use thiserror::Error as ThisError;
 use tokio::{
     runtime::Handle,
-    sync::oneshot,
-    task::{JoinError, JoinHandle},
+    sync::oneshot::{self, error::TryRecvError},
+    task::JoinHandle,
 };
 
-pub trait TaskResult<T>: Send {
-    fn resolve_result(
-        &mut self,
-        handle: &Handle,
-    ) -> Option<Result<T, Box<dyn Error + Send + Sync>>>;
+pub trait TaskResult<T> {
+    fn resolve_result(&mut self, handle: &Handle) -> Option<Result<T, TaskError>>;
 }
 
-impl<T: Send> TaskResult<T> for oneshot::Receiver<T> {
-    fn resolve_result(
-        &mut self,
-        _handle: &Handle,
-    ) -> Option<Result<T, Box<dyn Error + Send + Sync>>> {
+#[derive(ThisError, Debug)]
+#[error("The send channel was closed without sending a value.")]
+pub struct ChannelClosed;
+
+impl<T> TaskResult<T> for oneshot::Receiver<Result<T, TaskError>> {
+    fn resolve_result(&mut self, _handle: &Handle) -> Option<Result<T, TaskError>> {
         if self.is_empty() {
             return None;
         }
 
         match self.try_recv() {
-            Ok(out) => Some(Ok(out)),
-            Err(e) => Some(Err(Box::new(e))),
+            Ok(res) => Some(res),
+            Err(e) => match e {
+                TryRecvError::Empty => None,
+                TryRecvError::Closed => Some(Err(TaskError::TaskFailed(Arc::new(e)))),
+            },
         }
     }
 }
 
-impl<T: Send> TaskResult<T> for JoinHandle<T> {
-    fn resolve_result(
-        &mut self,
-        handle: &Handle,
-    ) -> Option<Result<T, Box<dyn Error + Send + Sync>>> {
+impl<T> TaskResult<T> for JoinHandle<Result<T, TaskError>> {
+    fn resolve_result(&mut self, handle: &Handle) -> Option<Result<T, TaskError>> {
         if !self.is_finished() {
             return None;
         }
 
-        match handle.block_on(self) {
-            Ok(out) => Some(Ok(out)),
-            Err(e) => Some(Err(Box::new(e))),
+        let join = handle.block_on(self);
+
+        match join {
+            Ok(res) => Some(res),
+            Err(e) => Some(Err(TaskError::TaskFailed(Arc::new(e)))),
         }
     }
 }
 
-#[derive(Debug)]
-enum ActionPoll<T, A: TaskResult<T>> {
-    /// Task is still running
-    Pending(A),
-    /// Task completed successfully
-    Completed(T),
-    /// Task failed with an error
-    Failed(Box<dyn Error + Send + Sync>),
-    /// Invalid state, only used for moving between states
-    Invalid,
-}
-
-pub(crate) struct QuicActionAttempt<T, A: TaskResult<T>> {
+pub(crate) struct QuicActionAttempt<T> {
     pub(crate) runtime: Handle,
-    pub(crate) action_state: ActionPoll<T, A>,
+    pub(crate) task_res: Box<dyn TaskResult<T>>,
+    /// A flag checking if the action state has returned a success value already
+    pub(crate) returned_value: Option<QuicActionError>,
 }
 
-impl<T, A: TaskResult<T>> QuicActionAttempt<T, A> {
+impl<T> QuicActionAttempt<T> {
+    pub fn new(runtime: Handle, task: impl TaskResult<T> + 'static) -> Self {
+        Self {
+            runtime,
+            task_res: Box::new(task),
+            returned_value: None,
+        }
+    }
+
     fn attempt_result(&mut self) -> Result<T, QuicActionError> {
-        let mut state: ActionPoll<T, A> = ActionPoll::Invalid;
+        if let Some(ret) = &self.returned_value {
+            return Err(ret.clone());
+        }
 
-        mem::swap(&mut state, &mut self.action_state);
+        let value = self.task_res.resolve_result(&self.runtime);
 
-        match state {
-            ActionPoll::Pending(ref mut poll) => {
-                let out = poll.resolve_result(&self.runtime);
-
-                if out.is_none() {
-                    // Swap memory back
-                    mem::swap(&mut state, &mut self.action_state);
-                    return Err(QuicActionError::InProgress);
-                }
-            }
-            ActionPoll::Completed(_) => todo!(),
-            ActionPoll::Failed(error) => todo!(),
-            ActionPoll::Invalid => todo!(),
+        let Some(res) = value else {
+            return Err(QuicActionError::Pending);
         };
 
-        todo!()
+        match res {
+            Ok(value) => {
+                self.returned_value = Some(QuicActionError::Consumed);
+                Ok(value)
+            }
+            Err(e) => match e {
+                TaskError::ConnectionFailed(err) => {
+                    self.returned_value = Some(QuicActionError::ConnectionFailed(err));
+                    Err(self.returned_value.as_ref().unwrap().clone())
+                }
+                TaskError::TaskFailed(err) => {
+                    self.returned_value = Some(QuicActionError::Crashed(Arc::new(err)));
+                    Err(self.returned_value.as_ref().unwrap().clone())
+                }
+            },
+        }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ThisError)]
+#[error("Quic action attempt failed to get a result")]
 pub enum QuicActionError {
-    InProgress,
+    #[error("Pending")]
+    Pending,
+    #[error("Consumed")]
     Consumed,
-    Failed(ConnectionError),
-    Crashed(Arc<JoinError>),
+    #[error("ConnectionFailed: {0}")]
+    ConnectionFailed(ConnectionError),
+    #[error("Crashed: {0}")]
+    Crashed(Arc<dyn std::error::Error + Send + Sync>),
+}
+
+enum TaskError {
+    ConnectionFailed(ConnectionError),
+    TaskFailed(Arc<dyn Error + Send + Sync>),
 }
 
 #[derive(Component, Debug, Clone)]
