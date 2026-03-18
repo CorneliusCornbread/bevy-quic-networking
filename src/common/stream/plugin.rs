@@ -43,7 +43,7 @@ fn client_bidir_stream_attempt(
 
         if let Err(e) = res {
             match &e {
-                QuicActionError::InProgress => continue,
+                QuicActionError::Pending => continue,
                 QuicActionError::Consumed => {
                     error!("Stream attempt consumed for entity: {:?}", entity)
                 }
@@ -98,7 +98,7 @@ fn server_bidir_stream_attempt(
 
         if let Err(e) = res {
             match &e {
-                QuicActionError::InProgress => continue,
+                QuicActionError::Pending => continue,
                 QuicActionError::Consumed => {
                     error!("Stream attempt consumed for entity: {:?}", entity)
                 }

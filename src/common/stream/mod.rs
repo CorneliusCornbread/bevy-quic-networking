@@ -2,7 +2,7 @@ use bevy::prelude::{Deref, DerefMut};
 use tokio::{runtime::Handle, sync::oneshot, task::JoinHandle};
 
 use crate::common::{
-    attempt::QuicActionAttempt,
+    attempt::{QuicActionAttempt, TaskError},
     stream::{receive::QuicReceiveStream, send::QuicSendStream},
 };
 
@@ -20,7 +20,7 @@ pub struct QuicReceiveStreamAttempt(QuicActionAttempt<Option<QuicReceiveStream>>
 impl QuicReceiveStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: JoinHandle<Result<Option<QuicReceiveStream>, s2n_quic::connection::Error>>,
+        conn_task: JoinHandle<Result<Option<QuicReceiveStream>, TaskError>>,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task))
     }
@@ -30,28 +30,19 @@ impl QuicReceiveStreamAttempt {
 pub struct QuicSendStreamAttempt(QuicActionAttempt<QuicSendStream>);
 
 impl QuicSendStreamAttempt {
-    pub fn new(
-        handle: Handle,
-        conn_task: JoinHandle<Result<QuicSendStream, s2n_quic::connection::Error>>,
-    ) -> Self {
+    pub fn new(handle: Handle, conn_task: JoinHandle<Result<QuicSendStream, TaskError>>) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task))
     }
 }
 
 #[derive(Deref, DerefMut)]
-pub struct QuicBidirectionalStreamAttempt {
-    stream_oneshot:
-        oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), s2n_quic::connection::Error>>,
-}
+pub struct QuicBidirectionalStreamAttempt(QuicActionAttempt<(QuicReceiveStream, QuicSendStream)>);
 
 impl QuicBidirectionalStreamAttempt {
     pub fn new(
-        conn_data: oneshot::Receiver<
-            Result<(QuicReceiveStream, QuicSendStream), s2n_quic::connection::Error>,
-        >,
+        handle: Handle,
+        conn_task: oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
     ) -> Self {
-        Self {
-            stream_oneshot: conn_data,
-        }
+        Self(QuicActionAttempt::new(handle, conn_task))
     }
 }

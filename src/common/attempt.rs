@@ -48,15 +48,15 @@ impl<T> TaskResult<T> for JoinHandle<Result<T, TaskError>> {
     }
 }
 
-pub(crate) struct QuicActionAttempt<T> {
+pub struct QuicActionAttempt<T> {
     pub(crate) runtime: Handle,
-    pub(crate) task_res: Box<dyn TaskResult<T>>,
+    pub(crate) task_res: Box<dyn TaskResult<T> + Send + Sync>,
     /// A flag checking if the action state has returned a success value already
     pub(crate) returned_value: Option<QuicActionError>,
 }
 
 impl<T> QuicActionAttempt<T> {
-    pub fn new(runtime: Handle, task: impl TaskResult<T> + 'static) -> Self {
+    pub fn new(runtime: Handle, task: impl TaskResult<T> + 'static + Send + Sync) -> Self {
         Self {
             runtime,
             task_res: Box::new(task),
@@ -64,7 +64,7 @@ impl<T> QuicActionAttempt<T> {
         }
     }
 
-    fn attempt_result(&mut self) -> Result<T, QuicActionError> {
+    pub fn attempt_result(&mut self) -> Result<T, QuicActionError> {
         if let Some(ret) = &self.returned_value {
             return Err(ret.clone());
         }
@@ -107,7 +107,7 @@ pub enum QuicActionError {
     Crashed(Arc<dyn std::error::Error + Send + Sync>),
 }
 
-enum TaskError {
+pub enum TaskError {
     ConnectionFailed(ConnectionError),
     TaskFailed(Arc<dyn Error + Send + Sync>),
 }

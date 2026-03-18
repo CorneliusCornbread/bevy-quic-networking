@@ -6,7 +6,10 @@ use s2n_quic::{Connection, connection::Error as ConnectionError};
 use tokio::{runtime::Handle, task::JoinHandle};
 
 use crate::{
-    common::connection::{QuicConnection, QuicConnectionAttempt},
+    common::{
+        attempt::TaskError,
+        connection::{QuicConnection, QuicConnectionAttempt},
+    },
     server::marker::QuicServerMarker,
 };
 
@@ -16,7 +19,7 @@ use crate::{
 pub struct QuicServerConnectionAttempt(QuicConnectionAttempt);
 
 impl QuicServerConnectionAttempt {
-    pub fn new(handle: Handle, conn_task: JoinHandle<Result<Connection, ConnectionError>>) -> Self {
+    pub fn new(handle: Handle, conn_task: JoinHandle<Result<Connection, TaskError>>) -> Self {
         Self(QuicConnectionAttempt::new(handle, conn_task))
     }
 }

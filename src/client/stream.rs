@@ -9,7 +9,7 @@ use tokio::{runtime::Handle, task::JoinHandle};
 use crate::{
     client::marker::QuicClientMarker,
     common::{
-        attempt::QuicActionError,
+        attempt::{QuicActionError, TaskError},
         connection::BidirectionalSessionAttempt,
         stream::{
             QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt, QuicSendStreamAttempt,
@@ -52,10 +52,7 @@ impl QuicClientBidirectionalStreamAttempt {
 pub struct QuicClientSendStreamAttempt(QuicSendStreamAttempt);
 
 impl QuicClientSendStreamAttempt {
-    pub fn new(
-        handle: Handle,
-        conn_task: JoinHandle<Result<QuicSendStream, s2n_quic::connection::Error>>,
-    ) -> Self {
+    pub fn new(handle: Handle, conn_task: JoinHandle<Result<QuicSendStream, TaskError>>) -> Self {
         Self(QuicSendStreamAttempt::new(handle, conn_task))
     }
 

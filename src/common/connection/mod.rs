@@ -16,7 +16,7 @@ use tokio::{
 };
 
 use crate::common::{
-    attempt::QuicActionAttempt,
+    attempt::{QuicActionAttempt, TaskError},
     connection::{disconnect::ConnectionDisconnectReason, task_state::ConnectionTaskState},
     stream::{
         QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt,
@@ -36,13 +36,13 @@ const CONNECTION_CHANNEL_SIZE: usize = 1024;
 
 enum ConnectionCommand {
     OpenBidirectional {
-        respond_to: oneshot::Sender<Result<(QuicReceiveStream, QuicSendStream), ConnectionError>>,
+        respond_to: oneshot::Sender<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
     },
     OpenSend {
-        respond_to: oneshot::Sender<Result<QuicSendStream, ConnectionError>>,
+        respond_to: oneshot::Sender<Result<QuicSendStream, TaskError>>,
     },
     AcceptReceive {
-        respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, ConnectionError>>,
+        respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, TaskError>>,
     },
 }
 
@@ -52,7 +52,7 @@ pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
 impl QuicConnectionAttempt {
     pub(crate) fn new(
         handle: Handle,
-        conn_task: JoinHandle<Result<Connection, ConnectionError>>,
+        conn_task: JoinHandle<Result<Connection, TaskError>>,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task))
     }
@@ -63,6 +63,7 @@ pub(crate) struct ReceiveSessionAttempt(pub QuicReceiveStreamAttempt, pub Stream
 
 #[derive(Debug)]
 pub struct QuicConnection {
+    runtime: Handle,
     task_state: ConnectionTaskState,
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
     id_gen: StreamIdGenerator,
@@ -84,6 +85,7 @@ impl QuicConnection {
         let handle = runtime.spawn(connection_task(connection, rec));
 
         Self {
+            runtime: runtime.clone(),
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
             id_gen: Default::default(),
@@ -115,7 +117,7 @@ impl QuicConnection {
         let cmd = ConnectionCommand::OpenBidirectional { respond_to: send };
 
         let attempt = BidirectionalSessionAttempt(
-            QuicBidirectionalStreamAttempt::new(rec),
+            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), rec),
             self.generate_stream_id(),
         );
 

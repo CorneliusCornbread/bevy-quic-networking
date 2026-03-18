@@ -42,7 +42,7 @@ fn server_connection_attempt(
 
         if let Err(e) = res {
             match e {
-                QuicActionError::InProgress => {
+                QuicActionError::Pending => {
                     continue;
                 } // TODO: Setup a timeout
                 QuicActionError::Consumed => {
@@ -101,7 +101,7 @@ fn client_connection_attempt(
 
         if let Err(e) = res {
             match e {
-                QuicActionError::InProgress => {
+                QuicActionError::Pending => {
                     continue;
                 } // TODO: Setup a timeout
                 QuicActionError::Consumed => {

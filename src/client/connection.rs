@@ -14,6 +14,7 @@ use crate::{
         },
     },
     common::{
+        attempt::TaskError,
         connection::{QuicConnection, QuicConnectionAttempt, StreamPollError},
         stream::id::StreamId,
     },
@@ -25,7 +26,7 @@ use crate::{
 pub struct QuicClientConnectionAttempt(QuicConnectionAttempt);
 
 impl QuicClientConnectionAttempt {
-    pub fn new(handle: Handle, conn_task: JoinHandle<Result<Connection, ConnectionError>>) -> Self {
+    pub fn new(handle: Handle, conn_task: JoinHandle<Result<Connection, TaskError>>) -> Self {
         Self(QuicConnectionAttempt::new(handle, conn_task))
     }
 }

@@ -11,9 +11,12 @@ use tokio::{runtime::Handle, sync::Mutex};
 
 use crate::{
     client::{connection::QuicClientConnectionAttempt, marker::QuicClientMarker},
-    common::connection::{
-        id::{ConnectionId, ConnectionIdGenerator},
-        runtime::TokioRuntime,
+    common::{
+        attempt::TaskError,
+        connection::{
+            id::{ConnectionId, ConnectionIdGenerator},
+            runtime::TokioRuntime,
+        },
     },
 };
 
@@ -73,8 +76,8 @@ impl QuicClient {
     }
 }
 
-async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, ConnectionError> {
-    attempt.await
+async fn create_connection(attempt: ConnectionAttempt) -> Result<Connection, TaskError> {
+    attempt.await.map_err(TaskError::ConnectionFailed)
 }
 
 async fn build() -> Client {
