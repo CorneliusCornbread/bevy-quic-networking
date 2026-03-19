@@ -1,5 +1,5 @@
 use bevy::{
-    log::warn,
+    log::{tracing::Instrument, warn},
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::{
@@ -33,6 +33,8 @@ pub mod runtime;
 pub mod task_state;
 
 const CONNECTION_CHANNEL_SIZE: usize = 1024;
+const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
+const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
 
 enum ConnectionCommand {
     OpenBidirectional {
@@ -43,6 +45,9 @@ enum ConnectionCommand {
     },
     AcceptReceive {
         respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, TaskError>>,
+    },
+    CloseConnection {
+        error_code: s2n_quic::application::Error,
     },
 }
 
@@ -82,7 +87,8 @@ impl QuicConnection {
             )
         }
 
-        let handle = runtime.spawn(connection_task(connection, rec));
+        let span = bevy::log::info_span!("quic_connection_task");
+        let handle = runtime.spawn(connection_task(connection, rec).instrument(span));
 
         Self {
             runtime: runtime.clone(),
@@ -121,16 +127,10 @@ impl QuicConnection {
             self.generate_stream_id(),
         );
 
-        todo!()
+        // Just ignore channel errors, they'll get handled in the attempt regardless
+        let _send_res = self.conn_command_channel.blocking_send(cmd);
 
-        /* let conn_task = self
-            .runtime
-            .spawn(open_bidirectional_task(self.connection.clone()));
-
-        BidirectionalSessionAttempt(
-            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), conn_task),
-            self.generate_stream_id(),
-        ) */
+        attempt
     }
 
     pub(crate) fn accept_receive_stream(&mut self) -> ReceiveSessionAttempt {
@@ -178,10 +178,119 @@ impl QuicConnection {
 }
 
 async fn connection_task(
-    conn: Connection,
-    cmd_rec: mpsc::Receiver<ConnectionCommand>,
+    mut conn: Connection,
+    mut cmd_rec: mpsc::Receiver<ConnectionCommand>,
 ) -> ConnectionDisconnectReason {
-    todo!()
+    let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
+
+    'connected: loop {
+        let count = cmd_rec
+            .recv_many(&mut cmd_buf, CONNECTION_CMD_BUFF_SIZE_MAX)
+            .await;
+
+        for cmd in cmd_buf.drain(..count) {
+            match cmd {
+                ConnectionCommand::OpenBidirectional { respond_to } => {
+                    let bidir_res = conn.open_bidirectional_stream().await;
+
+                    match bidir_res {
+                        Ok(stream) => {
+                            let (rec_stream, send_stream) = stream.split();
+
+                            let quic_send = QuicSendStream::new(Handle::current(), send_stream);
+                            let quic_rec = QuicReceiveStream::new(Handle::current(), rec_stream);
+
+                            let send_err = respond_to.send(Ok((quic_rec, quic_send))).is_err();
+
+                            if send_err {
+                                warn!(
+                                    "Bidrectional stream was opened with the response handler being closed before it could be sent."
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            let send_err = respond_to
+                                .send(Err(TaskError::ConnectionFailed(err)))
+                                .is_err();
+
+                            if send_err {
+                                warn!(
+                                    "Opened bidrectional stream errored with the response handler being closed before it could be sent: {0}",
+                                    err
+                                );
+                            }
+                        }
+                    };
+                }
+                ConnectionCommand::OpenSend { respond_to } => {
+                    let send_res = conn.open_send_stream().await;
+
+                    match send_res {
+                        Ok(stream) => {
+                            let quic_send = QuicSendStream::new(Handle::current(), stream);
+                            let send_err = respond_to.send(Ok(quic_send)).is_err();
+
+                            if send_err {
+                                warn!(
+                                    "Send stream was opened with the response handler being closed before it could be sent."
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            let send_err = respond_to
+                                .send(Err(TaskError::ConnectionFailed(err)))
+                                .is_err();
+
+                            if send_err {
+                                warn!(
+                                    "Opened send stream errored with the response handler being closed before it could be sent: {0}",
+                                    err
+                                );
+                            }
+                        }
+                    }
+                }
+                ConnectionCommand::AcceptReceive { respond_to } => {
+                    let accept_res = conn.accept_receive_stream().await;
+
+                    match accept_res {
+                        Ok(rec_opt) => {
+                            let mapped = rec_opt.map(|rec_stream| {
+                                QuicReceiveStream::new(Handle::current(), rec_stream)
+                            });
+
+                            let send_err = respond_to.send(Ok(mapped)).is_err();
+
+                            if send_err {
+                                warn!(
+                                    "Accept stream opened with the response handler being closed before it could be sent.",
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            let send_err = respond_to
+                                .send(Err(TaskError::ConnectionFailed(err)))
+                                .is_err();
+
+                            if send_err {
+                                warn!(
+                                    "Opened send stream errored with the response handler being closed before it could be sent: {0}",
+                                    err
+                                );
+                            }
+                        }
+                    }
+                }
+                ConnectionCommand::CloseConnection { error_code } => {
+                    conn.close(error_code);
+                    // TODO: Check if we have pending commands after this and log accordingly
+                    break 'connected;
+                }
+            }
+        }
+    }
+
+    ConnectionDisconnectReason::UserClosed
 }
 
 async fn open_bidirectional_task(

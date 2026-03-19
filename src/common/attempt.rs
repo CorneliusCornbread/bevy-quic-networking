@@ -107,8 +107,12 @@ pub enum QuicActionError {
     Crashed(Arc<dyn std::error::Error + Send + Sync>),
 }
 
+#[derive(Clone, Debug, ThisError)]
+#[error("Quic task failed")]
 pub enum TaskError {
+    #[error("ConnectionFailed: {0}")]
     ConnectionFailed(ConnectionError),
+    #[error("Crashed: {0}")]
     TaskFailed(Arc<dyn Error + Send + Sync>),
 }
 

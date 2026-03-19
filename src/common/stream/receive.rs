@@ -56,6 +56,7 @@ impl QuicReceiveStream {
             id: stream_id,
         };
 
+        // TODO: attach stream ID to span
         let span = bevy::log::info_span!("quic_rec_task");
         let rec_task = runtime.spawn(task.start().instrument(span));
         let task_state = StreamTaskState::new(runtime, rec_task);

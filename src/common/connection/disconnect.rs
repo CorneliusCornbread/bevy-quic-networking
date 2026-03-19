@@ -7,12 +7,8 @@ pub enum ConnectionDisconnectReason {
     UserClosed,
     PeerClosed,
     ConnectionError(s2n_quic::connection::Error),
-    MspcChannelClosed {
-        channel_name: String,
-    },
+    MspcChannelClosed { channel_name: String },
     InternalError(Arc<dyn Error + Send + Sync>),
-    /// This should in theory never happen
-    NoReason,
 }
 
 impl From<Arc<dyn Error + Send + Sync>> for ConnectionDisconnectReason {
@@ -40,9 +36,6 @@ impl From<ConnectionDisconnectReason> for DisconnectReason {
             }
             ConnectionDisconnectReason::InternalError(error) => DisconnectReason::ByError(anyhow!(
                 "Connection was closed due to an internal error: {error}"
-            )),
-            ConnectionDisconnectReason::NoReason => DisconnectReason::ByError(anyhow!(
-                "Connection was closed without reason, this is a bug :("
             )),
         }
     }
