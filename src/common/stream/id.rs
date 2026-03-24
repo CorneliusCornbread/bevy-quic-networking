@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use bevy::ecs::component::Component;
 
-use crate::common::IdGenerator;
+use crate::common::id::IdGenerator;
 
 #[derive(Debug, Default)]
 pub(crate) struct StreamIdGenerator {

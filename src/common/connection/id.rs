@@ -2,24 +2,14 @@ use std::fmt;
 
 use bevy::ecs::component::Component;
 
-use crate::common::IdGenerator;
+use crate::common::ConnectionType;
 
-#[derive(Default)]
-pub struct ConnectionIdGenerator {
-    generator: IdGenerator,
-}
-
+// TODO: make this not a component
 #[derive(PartialEq, Eq, Debug, Component, Clone, Copy)]
 pub struct ConnectionId {
+    connection_type: ConnectionType,
+    parent_id: u64,
     id: u64,
-}
-
-impl ConnectionIdGenerator {
-    pub fn generate_id(&mut self) -> ConnectionId {
-        ConnectionId {
-            id: self.generator.generate_unique(),
-        }
-    }
 }
 
 impl fmt::Display for ConnectionId {

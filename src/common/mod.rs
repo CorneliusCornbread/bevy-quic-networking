@@ -13,9 +13,16 @@ use crate::{
 
 pub mod attempt;
 pub mod connection;
+pub mod id;
 pub mod status_code;
 pub mod stream;
 pub(crate) mod task_state;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ConnectionType {
+    Server,
+    Client,
+}
 
 // TODO: Move connect, stream information, and data information into their own enums
 #[derive(Debug)]
@@ -38,18 +45,6 @@ impl<T> HandleChannelError for Result<(), TrySendError<T>> {
                 "Error buffer for async task is full or closed, the following error will be dropped: {send_err}"
             );
         }
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct IdGenerator {
-    current: AtomicU64,
-}
-
-impl IdGenerator {
-    pub fn generate_unique(&mut self) -> u64 {
-        self.current
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 }
 
