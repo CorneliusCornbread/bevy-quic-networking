@@ -2,6 +2,7 @@ use bevy::prelude::{Deref, DerefMut};
 use tokio::{runtime::Handle, sync::oneshot, task::JoinHandle};
 
 use crate::common::{
+    QuicParentId,
     attempt::{QuicActionAttempt, TaskError},
     stream::{receive::QuicReceiveStream, send::QuicSendStream},
 };
@@ -21,8 +22,9 @@ impl QuicReceiveStreamAttempt {
     pub fn new(
         handle: Handle,
         conn_task: JoinHandle<Result<Option<QuicReceiveStream>, TaskError>>,
+        parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task))
+        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
     }
 }
 
@@ -30,8 +32,12 @@ impl QuicReceiveStreamAttempt {
 pub struct QuicSendStreamAttempt(QuicActionAttempt<QuicSendStream>);
 
 impl QuicSendStreamAttempt {
-    pub fn new(handle: Handle, conn_task: JoinHandle<Result<QuicSendStream, TaskError>>) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task))
+    pub fn new(
+        handle: Handle,
+        conn_task: JoinHandle<Result<QuicSendStream, TaskError>>,
+        parent_id: QuicParentId,
+    ) -> Self {
+        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
     }
 }
 
@@ -42,7 +48,8 @@ impl QuicBidirectionalStreamAttempt {
     pub fn new(
         handle: Handle,
         conn_task: oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
+        parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task))
+        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
     }
 }

@@ -16,15 +16,12 @@ use tokio::{
 };
 
 use crate::common::{
+    QuicParentId,
     attempt::{QuicActionAttempt, TaskError},
-    connection::{
-        disconnect::ConnectionDisconnectReason, id::ConnectionId, task_state::ConnectionTaskState,
-    },
+    connection::{disconnect::ConnectionDisconnectReason, task_state::ConnectionTaskState},
     stream::{
-        QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt,
-        id::{StreamId, StreamIdGenerator},
-        receive::QuicReceiveStream,
-        send::QuicSendStream,
+        QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt, id::StreamId,
+        receive::QuicReceiveStream, send::QuicSendStream,
     },
 };
 
@@ -60,29 +57,32 @@ impl QuicConnectionAttempt {
     pub(crate) fn new(
         handle: Handle,
         conn_task: JoinHandle<Result<Connection, TaskError>>,
+        parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task))
+        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
     }
 }
 
-pub(crate) struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt, pub StreamId);
-pub(crate) struct ReceiveSessionAttempt(pub QuicReceiveStreamAttempt, pub StreamId);
+pub(crate) struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt);
+pub(crate) struct ReceiveSessionAttempt(pub QuicReceiveStreamAttempt);
 
 #[derive(Debug)]
 pub struct QuicConnection {
     runtime: Handle,
     task_state: ConnectionTaskState,
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
-    //connection_id: ConnectionId,
-    id_gen: StreamIdGenerator,
+    parent_id: QuicParentId,
+    id: u64,
 }
 
 impl QuicConnection {
     pub(crate) fn new(
         runtime: Handle,
         mut connection: Connection,
-        //connection_id: ConnectionId,
+        parent_id: QuicParentId,
     ) -> Self {
+        let id = connection.id();
+
         let res = connection.keep_alive(true);
 
         let (send, rec) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
@@ -94,7 +94,7 @@ impl QuicConnection {
             );
         }
 
-        // TODO: Rework ID system, having IDs be in separate components is a real PITA.
+        // TODO: change spans to have more unique information for each instance
         let span = bevy::log::info_span!("quic_connection_task", connection_id = connection.id());
 
         let task = ConnectionTask {
@@ -109,8 +109,8 @@ impl QuicConnection {
             runtime: runtime.clone(),
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
-            id_gen: Default::default(),
-            //connection_id,
+            parent_id,
+            id,
         }
     }
 
@@ -138,10 +138,11 @@ impl QuicConnection {
 
         let cmd = ConnectionCommand::OpenBidirectional { respond_to: send };
 
-        let attempt = BidirectionalSessionAttempt(
-            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), rec),
-            self.generate_stream_id(),
-        );
+        let attempt = BidirectionalSessionAttempt(QuicBidirectionalStreamAttempt::new(
+            self.runtime.clone(),
+            rec,
+            self.parent_id,
+        ));
 
         // Just ignore channel errors, they'll get handled in the attempt regardless
         let _send_res = self.conn_command_channel.blocking_send(cmd);
@@ -160,10 +161,6 @@ impl QuicConnection {
             QuicReceiveStreamAttempt::new(self.runtime.clone(), conn_task),
             self.generate_stream_id(),
         ) */
-    }
-
-    pub(crate) fn generate_stream_id(&mut self) -> StreamId {
-        self.id_gen.generate_id()
     }
 
     /// Returns true if the connection is still open.

@@ -8,9 +8,9 @@ use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::common::HandleChannelError;
 use crate::common::stream::disconnect::StreamDisconnectReason;
 use crate::common::stream::task_state::StreamTaskState;
+use crate::common::{HandleChannelError, QuicParentId};
 
 type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
 
@@ -31,6 +31,7 @@ pub struct QuicSendStream {
     outbound_data: Sender<Bytes>,
     outbound_control: Sender<SendControlMessage>,
     send_errors: Receiver<Box<dyn Error + Send + Sync>>,
+    parent_id: QuicParentId,
     stream_id: u64,
 }
 

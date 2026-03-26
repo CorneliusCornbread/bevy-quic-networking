@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use crate::{
     client::stream::{QuicClientReceiveStream, QuicClientSendStream},
-    common::stream::{disconnect::StreamDisconnectReason, id::StreamId},
+    common::stream::disconnect::StreamDisconnectReason,
     server::stream::{QuicServerReceiveStream, QuicServerSendStream},
 };
 use bevy::{
@@ -110,11 +110,11 @@ fn drain_recv_packets(
     }
 }
 
-fn drain_send_packets(
-    query: Query<(&mut Session, &mut QuicClientSendStream, &StreamId), With<QuicSession>>,
-) {
+fn drain_send_packets(query: Query<(&mut Session, &mut QuicClientSendStream), With<QuicSession>>) {
     for entity in query {
-        let (mut session, mut send, id) = entity;
+        let (mut session, mut send) = entity;
+        let id = send.
+        // TODO: get parent_id out of client send stream
 
         let res = send.send_many_drain(&mut session.send);
 

@@ -29,14 +29,15 @@ impl Plugin for ConnectionAttemptPlugin {
 fn server_connection_attempt(
     mut commands: Commands,
     runtime: Res<TokioRuntime>,
-    query: Query<(Entity, &mut QuicServerConnectionAttempt, &ConnectionId)>,
+    query: Query<(Entity, &mut QuicServerConnectionAttempt)>,
 ) {
     let _span = info_span!("server_connection_attempt").entered();
 
     let handle_ref = runtime.handle();
 
     for entity_bundle in query {
-        let (entity, mut attempt, id) = entity_bundle;
+        let (entity, mut attempt) = entity_bundle;
+        let parent_id = attempt.parent_id();
 
         let res = attempt.attempt_result();
 
@@ -63,7 +64,7 @@ fn server_connection_attempt(
                 use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
 
                 let err_comp = QuicActionErrorComponent::new(e, SystemTime::now());
-                let err_bundle = (err_comp, *id);
+                let err_bundle = (err_comp, *parent_id);
 
                 error_entity.insert(err_bundle);
             }
@@ -73,9 +74,9 @@ fn server_connection_attempt(
             continue;
         }
 
-        info!("New server connection entity with {id}");
+        info!("New server connection entity with {parent_id}");
         let conn = res.unwrap();
-        let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
+        let quic_conn = QuicConnection::new(handle_ref.clone(), conn, parent_id);
         let conn_bundle = QuicServerConnection::from_connection(quic_conn);
 
         commands
@@ -88,14 +89,15 @@ fn server_connection_attempt(
 fn client_connection_attempt(
     mut commands: Commands,
     runtime: Res<TokioRuntime>,
-    query: Query<(Entity, &mut QuicClientConnectionAttempt, &ConnectionId)>,
+    query: Query<(Entity, &mut QuicClientConnectionAttempt)>,
 ) {
     let _span = info_span!("client_connection_attempt").entered();
 
     let handle_ref = runtime.handle();
 
     for entity_bundle in query {
-        let (entity, mut attempt, id) = entity_bundle;
+        let (entity, mut attempt) = entity_bundle;
+        let parent_id = attempt.parent_id();
 
         let res = attempt.attempt_result();
 
@@ -122,7 +124,7 @@ fn client_connection_attempt(
                 use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
 
                 let err_comp = QuicActionErrorComponent::new(e, SystemTime::now());
-                let err_bundle = (err_comp, *id);
+                let err_bundle = (err_comp, *parent_id);
 
                 error_entity
                     .remove::<QuicClientConnectionAttempt>()
@@ -134,9 +136,9 @@ fn client_connection_attempt(
             continue;
         }
 
-        info!("New client connection entity with {id}");
+        info!("New client connection entity with {parent_id}");
         let conn = res.unwrap();
-        let quic_conn = QuicConnection::new(handle_ref.clone(), conn);
+        let quic_conn = QuicConnection::new(handle_ref.clone(), conn, parent_id);
         let conn_bundle = QuicClientConnection::from_connection(quic_conn);
 
         commands

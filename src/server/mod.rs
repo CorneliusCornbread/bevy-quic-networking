@@ -6,9 +6,10 @@ use s2n_quic_tls::certificate::{IntoCertificate, IntoPrivateKey};
 use tokio::{runtime::Handle, sync::Mutex, task::JoinError};
 
 use crate::{
-    common::connection::{
-        id::{ConnectionId, ConnectionIdGenerator},
-        runtime::TokioRuntime,
+    common::{
+        QuicParentId, QuicParentType,
+        connection::{id::ConnectionId, runtime::TokioRuntime},
+        id::IdGenerator,
     },
     server::{connection::QuicServerConnection, marker::QuicServerMarker},
 };
@@ -26,7 +27,7 @@ pub mod stream;
 pub struct QuicServer {
     runtime: Handle,
     server: Arc<Mutex<Server>>,
-    id_gen: ConnectionIdGenerator,
+    id: QuicParentId,
 }
 
 impl QuicServer {
@@ -48,7 +49,7 @@ impl QuicServer {
         Ok(Self {
             runtime: handle,
             server: server_mutex,
-            id_gen: Default::default(),
+            id: QuicParentId::generate_unique(QuicParentType::Server),
         })
     }
 
@@ -67,10 +68,11 @@ impl QuicServer {
         match poll {
             std::task::Poll::Ready(conn_opt) => {
                 if let Some(conn) = conn_opt {
-                    let ret = ConnectionPoll::NewConnection(
-                        QuicServerConnection::new(self.runtime.clone(), conn),
-                        self.id_gen.generate_id(),
-                    );
+                    let ret = ConnectionPoll::NewConnection(QuicServerConnection::new(
+                        self.runtime.clone(),
+                        conn,
+                        self.id,
+                    ));
 
                     Ok(ret)
                 } else {
@@ -83,13 +85,17 @@ impl QuicServer {
             std::task::Poll::Pending => Ok(ConnectionPoll::None),
         }
     }
+
+    pub fn id(&self) -> QuicParentId {
+        self.id
+    }
 }
 
 #[derive(Debug)]
 pub enum ConnectionPoll {
     None,
     ServerClosed,
-    NewConnection(QuicServerConnection, ConnectionId),
+    NewConnection(QuicServerConnection),
 }
 
 async fn build_server<C: IntoCertificate, PK: IntoPrivateKey>(

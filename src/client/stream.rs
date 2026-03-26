@@ -9,6 +9,7 @@ use tokio::{runtime::Handle, task::JoinHandle};
 use crate::{
     client::marker::QuicClientMarker,
     common::{
+        QuicParentId,
         attempt::{QuicActionError, TaskError},
         connection::BidirectionalSessionAttempt,
         stream::{
@@ -41,8 +42,8 @@ impl QuicClientBidirectionalStreamAttempt {
         //self.0.attempt_result()
     }
 
-    pub(crate) fn from_session_attempt(attempt: BidirectionalSessionAttempt) -> (Self, StreamId) {
-        (Self(attempt.0), attempt.1)
+    pub(crate) fn from_session_attempt(attempt: BidirectionalSessionAttempt) -> Self {
+        Self(attempt.0)
     }
 }
 
@@ -52,8 +53,12 @@ impl QuicClientBidirectionalStreamAttempt {
 pub struct QuicClientSendStreamAttempt(QuicSendStreamAttempt);
 
 impl QuicClientSendStreamAttempt {
-    pub fn new(handle: Handle, conn_task: JoinHandle<Result<QuicSendStream, TaskError>>) -> Self {
-        Self(QuicSendStreamAttempt::new(handle, conn_task))
+    pub fn new(
+        handle: Handle,
+        conn_task: JoinHandle<Result<QuicSendStream, TaskError>>,
+        parent_id: QuicParentId,
+    ) -> Self {
+        Self(QuicSendStreamAttempt::new(handle, conn_task, parent_id))
     }
 
     pub fn attempt_result(&mut self) -> Result<QuicSendStream, QuicActionError> {

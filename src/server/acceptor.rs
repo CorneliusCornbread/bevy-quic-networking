@@ -46,13 +46,8 @@ fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServer, E
         match conn {
             super::ConnectionPoll::None => continue,
             super::ConnectionPoll::ServerClosed => continue,
-            super::ConnectionPoll::NewConnection(quic_connection, connection_id) => {
-                let bundle = (
-                    quic_connection,
-                    connection_id,
-                    QuicServerMarker,
-                    ChildOf(entity),
-                );
+            super::ConnectionPoll::NewConnection(quic_connection) => {
+                let bundle = (quic_connection, QuicServerMarker, ChildOf(entity));
                 commands.spawn(bundle);
             }
         }
@@ -75,14 +70,14 @@ fn accept_streams(
                     let quic_send = QuicServerSendStream::new(handle.clone(), send);
 
                     commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, quic_send, QuicServerMarker, QuicSession, id));
+                        parent.spawn((quic_rec, quic_send, QuicServerMarker, QuicSession));
                     });
                 }
                 PeerStream::Receive(receive_stream) => {
                     let quic_rec = QuicServerReceiveStream::new(handle.clone(), receive_stream);
 
                     commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, QuicServerMarker, QuicSession, id));
+                        parent.spawn((quic_rec, QuicServerMarker, QuicSession));
                     });
                 }
             }

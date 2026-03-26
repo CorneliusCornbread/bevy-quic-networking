@@ -12,11 +12,9 @@ use tokio::{runtime::Handle, sync::Mutex};
 use crate::{
     client::{connection::QuicClientConnectionAttempt, marker::QuicClientMarker},
     common::{
+        QuicParentId, QuicParentType,
         attempt::TaskError,
-        connection::{
-            id::{ConnectionId, ConnectionIdGenerator},
-            runtime::TokioRuntime,
-        },
+        connection::{id::ConnectionId, runtime::TokioRuntime},
     },
 };
 
@@ -30,7 +28,7 @@ pub mod stream;
 pub struct QuicClient {
     runtime: Handle,
     client: Arc<Mutex<Client>>,
-    id_gen: ConnectionIdGenerator,
+    id: QuicParentId,
 }
 
 impl QuicClient {
@@ -40,7 +38,7 @@ impl QuicClient {
         Self {
             runtime: runtime.handle().clone(),
             client: Arc::new(Mutex::new(client)),
-            id_gen: Default::default(),
+            id: QuicParentId::generate_unique(QuicParentType::Client),
         }
     }
 
@@ -53,26 +51,24 @@ impl QuicClient {
         let ret = Self {
             runtime: runtime.handle().clone(),
             client: Arc::new(Mutex::new(client)),
-            id_gen: Default::default(),
+            id: QuicParentId::generate_unique(QuicParentType::Client),
         };
 
         Ok(ret)
     }
 
+    pub fn id(&self) -> QuicParentId {
+        self.id
+    }
+
     /// Opens a new connection to the given `connect` target. Returns an attempt and an ID assigned to the connection.
-    pub fn open_connection(
-        &mut self,
-        connect: Connect,
-    ) -> (QuicClientConnectionAttempt, ConnectionId) {
+    pub fn open_connection(&mut self, connect: Connect) -> QuicClientConnectionAttempt {
         let client = &self.client.blocking_lock();
         let attempt = client.connect(connect);
 
         let conn_task = self.runtime.spawn(create_connection(attempt));
 
-        (
-            QuicClientConnectionAttempt::new(self.runtime.clone(), conn_task),
-            self.id_gen.generate_id(),
-        )
+        QuicClientConnectionAttempt::new(self.runtime.clone(), conn_task, self.id)
     }
 }
 

@@ -9,6 +9,8 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::common::QuicParentId;
+
 pub trait TaskResult<T> {
     fn resolve_result(&mut self, handle: &Handle) -> Option<Result<T, TaskError>>;
 }
@@ -53,14 +55,20 @@ pub struct QuicActionAttempt<T> {
     pub(crate) task_res: Box<dyn TaskResult<T> + Send + Sync>,
     /// A flag checking if the action state has returned a success value already
     pub(crate) returned_value: Option<QuicActionError>,
+    pub(crate) parent_id: QuicParentId,
 }
 
 impl<T> QuicActionAttempt<T> {
-    pub fn new(runtime: Handle, task: impl TaskResult<T> + 'static + Send + Sync) -> Self {
+    pub fn new(
+        runtime: Handle,
+        task: impl TaskResult<T> + 'static + Send + Sync,
+        parent_id: QuicParentId,
+    ) -> Self {
         Self {
             runtime,
             task_res: Box::new(task),
             returned_value: None,
+            parent_id,
         }
     }
 
@@ -91,6 +99,10 @@ impl<T> QuicActionAttempt<T> {
                 }
             },
         }
+    }
+
+    pub fn parent_id(&self) -> QuicParentId {
+        self.parent_id
     }
 }
 

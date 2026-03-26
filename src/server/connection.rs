@@ -7,6 +7,7 @@ use tokio::{runtime::Handle, task::JoinHandle};
 
 use crate::{
     common::{
+        QuicParentId,
         attempt::TaskError,
         connection::{QuicConnection, QuicConnectionAttempt},
     },
@@ -19,8 +20,12 @@ use crate::{
 pub struct QuicServerConnectionAttempt(QuicConnectionAttempt);
 
 impl QuicServerConnectionAttempt {
-    pub fn new(handle: Handle, conn_task: JoinHandle<Result<Connection, TaskError>>) -> Self {
-        Self(QuicConnectionAttempt::new(handle, conn_task))
+    pub fn new(
+        handle: Handle,
+        conn_task: JoinHandle<Result<Connection, TaskError>>,
+        parent_id: QuicParentId,
+    ) -> Self {
+        Self(QuicConnectionAttempt::new(handle, conn_task, parent_id))
     }
 }
 
@@ -32,9 +37,9 @@ pub struct QuicServerConnection {
 
 // TODO: add open bidirectional stream and unidirectional stream functions
 impl QuicServerConnection {
-    pub fn new(runtime: Handle, connection: Connection) -> Self {
+    pub fn new(runtime: Handle, connection: Connection, parent_id: QuicParentId) -> Self {
         Self {
-            connection: QuicConnection::new(runtime, connection),
+            connection: QuicConnection::new(runtime, connection, parent_id),
         }
     }
 
