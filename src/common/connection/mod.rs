@@ -101,6 +101,7 @@ impl QuicConnection {
             connection,
             cmd_receiver: rec,
             disconnect_flag: None,
+            parent_id,
         };
 
         let handle = runtime.spawn(task.start().instrument(span));
@@ -114,7 +115,7 @@ impl QuicConnection {
         }
     }
 
-    pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, StreamId), StreamPollError> {
+    pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), StreamPollError> {
         todo!()
 
         /* let waker = Arc::new(futures::task::noop_waker_ref());
@@ -194,6 +195,7 @@ struct ConnectionTask {
     connection: Connection,
     cmd_receiver: mpsc::Receiver<ConnectionCommand>,
     disconnect_flag: Option<ConnectionDisconnectReason>,
+    parent_id: QuicParentId,
 }
 
 impl ConnectionTask {
@@ -219,9 +221,16 @@ impl ConnectionTask {
                             Ok(stream) => {
                                 let (rec_stream, send_stream) = stream.split();
 
-                                let quic_send = QuicSendStream::new(Handle::current(), send_stream);
-                                let quic_rec =
-                                    QuicReceiveStream::new(Handle::current(), rec_stream);
+                                let quic_send = QuicSendStream::new(
+                                    Handle::current(),
+                                    send_stream,
+                                    self.parent_id,
+                                );
+                                let quic_rec = QuicReceiveStream::new(
+                                    Handle::current(),
+                                    rec_stream,
+                                    self.parent_id,
+                                );
 
                                 let send_err = respond_to.send(Ok((quic_rec, quic_send))).is_err();
 
@@ -250,7 +259,8 @@ impl ConnectionTask {
 
                         match send_res {
                             Ok(stream) => {
-                                let quic_send = QuicSendStream::new(Handle::current(), stream);
+                                let quic_send =
+                                    QuicSendStream::new(Handle::current(), stream, self.parent_id);
                                 let send_err = respond_to.send(Ok(quic_send)).is_err();
 
                                 if send_err {
@@ -279,7 +289,11 @@ impl ConnectionTask {
                         match accept_res {
                             Ok(rec_opt) => {
                                 let mapped = rec_opt.map(|rec_stream| {
-                                    QuicReceiveStream::new(Handle::current(), rec_stream)
+                                    QuicReceiveStream::new(
+                                        Handle::current(),
+                                        rec_stream,
+                                        self.parent_id,
+                                    )
                                 });
 
                                 let send_err = respond_to.send(Ok(mapped)).is_err();
@@ -326,6 +340,8 @@ impl ConnectionTask {
 async fn open_bidirectional_task(
     mut conn: Connection,
 ) -> Result<(QuicReceiveStream, QuicSendStream), ConnectionError> {
+    todo!("Remove this function for long running version");
+
     let bi_stream_res: Result<BidirectionalStream, ConnectionError>;
 
     bi_stream_res = conn.open_bidirectional_stream().await;
@@ -333,15 +349,17 @@ async fn open_bidirectional_task(
     let bi_stream = bi_stream_res?;
     let (rec, send) = bi_stream.split();
 
-    let send_stream = QuicSendStream::new(Handle::current(), send);
-    let rec_stream = QuicReceiveStream::new(Handle::current(), rec);
+    //let send_stream = QuicSendStream::new(Handle::current(), send);
+    //let rec_stream = QuicReceiveStream::new(Handle::current(), rec);
 
-    Ok((rec_stream, send_stream))
+    //Ok((rec_stream, send_stream))
 }
 
 async fn accept_receive_task(
     conn: Arc<Mutex<Connection>>,
 ) -> Result<Option<QuicReceiveStream>, ConnectionError> {
+    todo!("Remove this function for long running version");
+
     let rec_stream_res: Result<Option<ReceiveStream>, ConnectionError>;
 
     {
@@ -365,9 +383,9 @@ async fn accept_receive_task(
     }
 
     let stream = opt.unwrap();
-    let quic_rec_stream = QuicReceiveStream::new(Handle::current(), stream);
+    //let quic_rec_stream = QuicReceiveStream::new(Handle::current(), stream);
 
-    Ok(Some(quic_rec_stream))
+    //Ok(Some(quic_rec_stream))
 }
 
 #[derive(Debug)]

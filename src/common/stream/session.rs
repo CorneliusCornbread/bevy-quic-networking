@@ -113,17 +113,16 @@ fn drain_recv_packets(
 fn drain_send_packets(query: Query<(&mut Session, &mut QuicClientSendStream), With<QuicSession>>) {
     for entity in query {
         let (mut session, mut send) = entity;
-        let id = send.
-        // TODO: get parent_id out of client send stream
+        let parent_id = send.parent_id();
 
         let res = send.send_many_drain(&mut session.send);
 
+        #[cfg(feature = "performance-warns")]
         if res.is_err() {
-            #[cfg(feature = "performance-warns")]
             warn!(
                 "Drain send unable to fully drain send buffer. Remaining items in buffer: {}\nHas the state of '{}' been corrupted?",
                 session.send.len(),
-                id
+                parent_id
             )
         }
     }

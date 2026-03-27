@@ -17,7 +17,6 @@ use crate::{
         QuicParentId,
         attempt::TaskError,
         connection::{QuicConnection, QuicConnectionAttempt, StreamPollError},
-        stream::id::StreamId,
     },
 };
 
@@ -55,24 +54,25 @@ impl QuicClientConnection {
 
     /// Called to accept any pending streams manually. Should only be done
     /// if you're using a plugin setup which doesn't use the default accepters.
-    pub fn accept_streams(&mut self) -> Result<(PeerStream, StreamId), StreamPollError> {
+    //TODO: make our own "PeerStream" enum with the parent Id embedded
+    pub fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), StreamPollError> {
         self.connection.accept_streams()
     }
 
     /// Requests to open a bidirectional stream on the current client connection.
     ///
     /// Returns a tuple including the stream attempt and a unique StreamId.
-    pub fn open_bidrectional_stream(&mut self) -> (QuicClientBidirectionalStreamAttempt, StreamId) {
+    pub fn open_bidrectional_stream(&mut self) -> QuicClientBidirectionalStreamAttempt {
         QuicClientBidirectionalStreamAttempt::from_session_attempt(
             self.connection.open_bidrectional_stream(),
         )
     }
 
-    pub fn open_send_stream(&mut self) -> (QuicClientSendStreamAttempt, StreamId) {
+    pub fn open_send_stream(&mut self) -> QuicClientSendStreamAttempt {
         todo!()
     }
 
-    pub fn accept_receive_stream(&mut self) -> Option<(QuicClientReceiveStream, StreamId)> {
+    pub fn accept_receive_stream(&mut self) -> Option<QuicClientReceiveStream> {
         let rec = self.connection.accept_receive_stream();
 
         todo!()

@@ -3,11 +3,12 @@ use bevy::{
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::stream::{ReceiveStream, SendStream};
-use tokio::{runtime::Handle, task::JoinHandle};
+use tokio::{runtime::Handle, sync::oneshot};
 
 use crate::{
     common::{
-        attempt::QuicActionError,
+        QuicParentId,
+        attempt::{QuicActionError, TaskError},
         stream::{
             QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
         },
@@ -22,17 +23,20 @@ pub struct QuicServerBidirectionalStreamAttempt(QuicBidirectionalStreamAttempt);
 impl QuicServerBidirectionalStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: JoinHandle<
-            Result<(QuicReceiveStream, QuicSendStream), s2n_quic::connection::Error>,
-        >,
+        conn_task: oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
+        parent_id: QuicParentId,
     ) -> Self {
-        todo!();
-        //Self(QuicBidirectionalStreamAttempt::new(handle, conn_task))
+        Self(QuicBidirectionalStreamAttempt::new(
+            handle, conn_task, parent_id,
+        ))
     }
 
     pub fn get_output(&mut self) -> Result<(QuicReceiveStream, QuicSendStream), QuicActionError> {
-        todo!();
-        //self.0.attempt_result()
+        self.0.attempt_result()
+    }
+
+    pub fn parent_id(&self) -> QuicParentId {
+        self.0.parent_id()
     }
 }
 
@@ -41,8 +45,8 @@ impl QuicServerBidirectionalStreamAttempt {
 pub struct QuicServerSendStream(QuicSendStream);
 
 impl QuicServerSendStream {
-    pub fn new(runtime: Handle, send: SendStream) -> Self {
-        Self(QuicSendStream::new(runtime, send))
+    pub fn new(runtime: Handle, send: SendStream, parent_id: QuicParentId) -> Self {
+        Self(QuicSendStream::new(runtime, send, parent_id))
     }
 
     pub(crate) fn from_send_stream(quic_send: QuicSendStream) -> Self {
@@ -55,8 +59,8 @@ impl QuicServerSendStream {
 pub struct QuicServerReceiveStream(QuicReceiveStream);
 
 impl QuicServerReceiveStream {
-    pub fn new(runtime: Handle, rec: ReceiveStream) -> Self {
-        Self(QuicReceiveStream::new(runtime, rec))
+    pub fn new(runtime: Handle, rec: ReceiveStream, parent_id: QuicParentId) -> Self {
+        Self(QuicReceiveStream::new(runtime, rec, parent_id))
     }
 
     pub(crate) fn from_rec_stream(quic_rec: QuicReceiveStream) -> Self {

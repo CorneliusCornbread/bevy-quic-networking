@@ -36,7 +36,7 @@ pub struct QuicSendStream {
 }
 
 impl QuicSendStream {
-    pub fn new(runtime: Handle, send: SendStream) -> Self {
+    pub fn new(runtime: Handle, send: SendStream, parent_id: QuicParentId) -> Self {
         let stream_id = send.id();
         let addr = send.connection().local_addr();
 
@@ -63,6 +63,7 @@ impl QuicSendStream {
             outbound_data,
             outbound_control,
             send_errors,
+            parent_id,
             stream_id,
         }
     }
@@ -131,6 +132,14 @@ impl QuicSendStream {
 
     pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
         self.task_state.get_disconnect_reason()
+    }
+
+    pub fn parent_id(&self) -> QuicParentId {
+        self.parent_id
+    }
+
+    pub fn id(&self) -> u64 {
+        self.stream_id
     }
 }
 

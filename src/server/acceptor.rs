@@ -62,19 +62,20 @@ fn accept_streams(
     let handle = tokio.handle();
 
     for (connection_entity, mut connection) in connection_query {
-        if let Ok((stream, id)) = connection.accept_streams() {
+        if let Ok((stream, parent_id)) = connection.accept_streams() {
             match stream {
                 PeerStream::Bidirectional(bidirectional_stream) => {
                     let (rec, send) = bidirectional_stream.split();
-                    let quic_rec = QuicServerReceiveStream::new(handle.clone(), rec);
-                    let quic_send = QuicServerSendStream::new(handle.clone(), send);
+                    let quic_rec = QuicServerReceiveStream::new(handle.clone(), rec, parent_id);
+                    let quic_send = QuicServerSendStream::new(handle.clone(), send, parent_id);
 
                     commands.entity(connection_entity).with_children(|parent| {
                         parent.spawn((quic_rec, quic_send, QuicServerMarker, QuicSession));
                     });
                 }
                 PeerStream::Receive(receive_stream) => {
-                    let quic_rec = QuicServerReceiveStream::new(handle.clone(), receive_stream);
+                    let quic_rec =
+                        QuicServerReceiveStream::new(handle.clone(), receive_stream, parent_id);
 
                     commands.entity(connection_entity).with_children(|parent| {
                         parent.spawn((quic_rec, QuicServerMarker, QuicSession));

@@ -32,12 +32,13 @@ impl Plugin for StreamAttemptPlugin {
 
 fn client_bidir_stream_attempt(
     mut commands: Commands,
-    query: Query<(Entity, &mut QuicClientBidirectionalStreamAttempt, &StreamId)>,
+    query: Query<(Entity, &mut QuicClientBidirectionalStreamAttempt)>,
 ) {
     let _span = info_span!("client_bidir_stream_attempt").entered();
 
     for entity_bundle in query {
-        let (entity, mut attempt, id) = entity_bundle;
+        let (entity, mut attempt) = entity_bundle;
+        let parent_id = attempt.parent_id();
 
         let res = attempt.attempt_result();
 
@@ -62,7 +63,7 @@ fn client_bidir_stream_attempt(
                 use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
 
                 let err_comp = QuicActionErrorComponent::new(e, SystemTime::now());
-                let err_bundle = (err_comp, *id);
+                let err_bundle = (err_comp, *parent_id);
 
                 error_entity.insert(err_bundle);
             }
@@ -76,7 +77,7 @@ fn client_bidir_stream_attempt(
         let send_stream = QuicClientSendStream::from_send_stream(send);
         let rec_stream = QuicClientReceiveStream::from_rec_stream(rec);
 
-        info!("Spawning bidirectional stream with {id}");
+        info!("Spawning bidirectional stream with {parent_id}");
 
         commands
             .entity(entity)
@@ -87,12 +88,13 @@ fn client_bidir_stream_attempt(
 
 fn server_bidir_stream_attempt(
     mut commands: Commands,
-    query: Query<(Entity, &mut QuicServerBidirectionalStreamAttempt, &StreamId)>,
+    query: Query<(Entity, &mut QuicServerBidirectionalStreamAttempt)>,
 ) {
     let _span = info_span!("server_bidir_stream_attempt").entered();
 
     for entity_bundle in query {
-        let (entity, mut attempt, id) = entity_bundle;
+        let (entity, mut attempt) = entity_bundle;
+        let parent_id = attempt.parent_id();
 
         let res = attempt.get_output();
 
@@ -117,7 +119,7 @@ fn server_bidir_stream_attempt(
                 use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
 
                 let err_comp = QuicActionErrorComponent::new(e, SystemTime::now());
-                let err_bundle = (err_comp, *id);
+                let err_bundle = (err_comp, *parent_id);
 
                 error_entity.insert(err_bundle);
             }
@@ -131,7 +133,7 @@ fn server_bidir_stream_attempt(
         let send_stream = QuicServerSendStream::from_send_stream(send);
         let rec_stream = QuicServerReceiveStream::from_rec_stream(rec);
 
-        info!("Spawning server bidirectional stream with {id}");
+        info!("Spawning server bidirectional stream with {parent_id}");
 
         commands
             .entity(entity)

@@ -12,7 +12,7 @@ use tokio::{
 };
 
 use crate::common::{
-    HandleChannelError,
+    HandleChannelError, QuicParentId,
     stream::{disconnect::StreamDisconnectReason, task_state::StreamTaskState},
 };
 
@@ -34,11 +34,12 @@ pub struct QuicReceiveStream {
     inbound_data: Receiver<RecvPacket>,
     inbound_control: Sender<RecControlMessage>,
     receive_errors: Receiver<Box<dyn Error + Send + Sync>>,
+    parent_id: QuicParentId,
     stream_id: u64,
 }
 
 impl QuicReceiveStream {
-    pub fn new(runtime: Handle, rec: ReceiveStream) -> Self {
+    pub fn new(runtime: Handle, rec: ReceiveStream, parent_id: QuicParentId) -> Self {
         let stream_id = rec.id();
         let addr = rec.connection().remote_addr();
 
@@ -66,6 +67,7 @@ impl QuicReceiveStream {
             inbound_data,
             inbound_control,
             receive_errors,
+            parent_id,
             stream_id,
         }
     }
