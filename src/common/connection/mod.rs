@@ -115,23 +115,22 @@ impl QuicConnection {
         }
     }
 
+    // TODO: make the return type for this more sane
     pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), StreamPollError> {
+        let (send, rec) = oneshot::channel();
+
+        let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
+
+        self.conn_command_channel.blocking_send(cmd);
+
+        let stream_res = rec
+            .blocking_recv()
+            .map_err(|e| StreamPollError::Error(TaskError::TaskFailed(Arc::new(e))))?;
+
+        let stream: Result<Option<QuicReceiveStream>, StreamPollError> =
+            stream_res.map_err(|e| StreamPollError::Error(e));
+
         todo!()
-
-        /* let waker = Arc::new(futures::task::noop_waker_ref());
-        let mut cx = std::task::Context::from_waker(&waker);
-
-        let mut lock = self.connection.try_lock()?;
-        let poll = lock.poll_accept(&mut cx);
-
-        if let std::task::Poll::Ready(res) = poll
-            && let Ok(opt) = res
-            && let Some(stream) = opt
-        {
-            return Ok((stream, self.id_gen.generate_id()));
-        }
-
-        Err(StreamPollError::None) */
     }
 
     pub(crate) fn open_bidrectional_stream(&mut self) -> BidirectionalSessionAttempt {
@@ -337,68 +336,8 @@ impl ConnectionTask {
     }
 }
 
-async fn open_bidirectional_task(
-    mut conn: Connection,
-) -> Result<(QuicReceiveStream, QuicSendStream), ConnectionError> {
-    todo!("Remove this function for long running version");
-
-    let bi_stream_res: Result<BidirectionalStream, ConnectionError>;
-
-    bi_stream_res = conn.open_bidirectional_stream().await;
-
-    let bi_stream = bi_stream_res?;
-    let (rec, send) = bi_stream.split();
-
-    //let send_stream = QuicSendStream::new(Handle::current(), send);
-    //let rec_stream = QuicReceiveStream::new(Handle::current(), rec);
-
-    //Ok((rec_stream, send_stream))
-}
-
-async fn accept_receive_task(
-    conn: Arc<Mutex<Connection>>,
-) -> Result<Option<QuicReceiveStream>, ConnectionError> {
-    todo!("Remove this function for long running version");
-
-    let rec_stream_res: Result<Option<ReceiveStream>, ConnectionError>;
-
-    {
-        let mut conn = conn.lock().await;
-
-        rec_stream_res = match timeout(Duration::from_millis(1), conn.accept_receive_stream()).await
-        {
-            Ok(res) => res,
-            Err(_e) => Ok(None),
-        }
-    }
-
-    if let Err(e) = rec_stream_res {
-        return Err(e);
-    }
-
-    let opt = rec_stream_res.unwrap();
-
-    if let None = opt {
-        return Ok(None);
-    }
-
-    let stream = opt.unwrap();
-    //let quic_rec_stream = QuicReceiveStream::new(Handle::current(), stream);
-
-    //Ok(Some(quic_rec_stream))
-}
-
 #[derive(Debug)]
 pub enum StreamPollError {
     None,
-    Error(Box<dyn Error>),
-}
-
-impl<E> From<E> for StreamPollError
-where
-    E: Error + 'static,
-{
-    fn from(err: E) -> Self {
-        StreamPollError::Error(Box::new(err))
-    }
+    Error(TaskError),
 }
