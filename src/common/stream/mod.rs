@@ -1,4 +1,7 @@
-use bevy::prelude::{Deref, DerefMut};
+use bevy::{
+    ecs::component::Component,
+    prelude::{Deref, DerefMut},
+};
 use tokio::{runtime::Handle, sync::oneshot, task::JoinHandle};
 
 use crate::common::{
@@ -15,7 +18,7 @@ pub mod send;
 pub mod session;
 pub mod task_state;
 
-#[derive(Deref, DerefMut)]
+#[derive(Deref, DerefMut, Component)]
 pub struct QuicReceiveStreamAttempt(QuicActionAttempt<Option<QuicReceiveStream>>);
 
 impl QuicReceiveStreamAttempt {
@@ -28,7 +31,7 @@ impl QuicReceiveStreamAttempt {
     }
 }
 
-#[derive(Deref, DerefMut)]
+#[derive(Deref, DerefMut, Component)]
 pub struct QuicSendStreamAttempt(QuicActionAttempt<QuicSendStream>);
 
 impl QuicSendStreamAttempt {
@@ -41,7 +44,7 @@ impl QuicSendStreamAttempt {
     }
 }
 
-#[derive(Deref, DerefMut)]
+#[derive(Deref, DerefMut, Component)]
 pub struct QuicBidirectionalStreamAttempt(QuicActionAttempt<(QuicReceiveStream, QuicSendStream)>);
 
 impl QuicBidirectionalStreamAttempt {

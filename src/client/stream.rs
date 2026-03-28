@@ -13,7 +13,7 @@ use crate::{
         attempt::{QuicActionError, TaskError},
         connection::BidirectionalSessionAttempt,
         stream::{
-            QuicBidirectionalStreamAttempt, QuicSendStreamAttempt, receive::QuicReceiveStream,
+            BidirectionalStreamAttempt, QuicSendStreamAttempt, receive::QuicReceiveStream,
             send::QuicSendStream,
         },
     },
@@ -22,7 +22,7 @@ use crate::{
 #[derive(Component)]
 #[require(QuicClientMarker)]
 #[require(SessionEndpoint)]
-pub struct QuicClientBidirectionalStreamAttempt(QuicBidirectionalStreamAttempt);
+pub struct QuicClientBidirectionalStreamAttempt(BidirectionalStreamAttempt);
 
 impl QuicClientBidirectionalStreamAttempt {
     pub fn new(
@@ -30,7 +30,7 @@ impl QuicClientBidirectionalStreamAttempt {
         conn_task: oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
         parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicBidirectionalStreamAttempt::new(
+        Self(BidirectionalStreamAttempt::new(
             handle, conn_task, parent_id,
         ))
     }

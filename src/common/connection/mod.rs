@@ -20,8 +20,8 @@ use crate::common::{
     attempt::{QuicActionAttempt, TaskError},
     connection::{disconnect::ConnectionDisconnectReason, task_state::ConnectionTaskState},
     stream::{
-        QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt, id::StreamId,
-        receive::QuicReceiveStream, send::QuicSendStream,
+        BidirectionalStreamAttempt, QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt,
+        id::StreamId, receive::QuicReceiveStream, send::QuicSendStream,
     },
 };
 
@@ -45,6 +45,9 @@ enum ConnectionCommand {
     AcceptReceive {
         respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, TaskError>>,
     },
+    Accept {
+        respond_to: oneshot::Sender<Result<Option<PeerStream>, TaskError>>,
+    },
     CloseConnection {
         error_code: s2n_quic::application::Error,
     },
@@ -62,9 +65,6 @@ impl QuicConnectionAttempt {
         Self(QuicActionAttempt::new(handle, conn_task, parent_id))
     }
 }
-
-pub(crate) struct BidirectionalSessionAttempt(pub QuicBidirectionalStreamAttempt);
-pub(crate) struct ReceiveSessionAttempt(pub QuicReceiveStreamAttempt);
 
 #[derive(Debug)]
 pub struct QuicConnection {
@@ -117,6 +117,10 @@ impl QuicConnection {
 
     // TODO: make the return type for this more sane
     pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), StreamPollError> {
+        todo!()
+    }
+
+    pub(crate) fn accept_receive_stream(&mut self) -> ReceiveSessionAttempt {
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
@@ -130,37 +134,21 @@ impl QuicConnection {
         let stream: Result<Option<QuicReceiveStream>, StreamPollError> =
             stream_res.map_err(|e| StreamPollError::Error(e));
 
-        todo!()
+        //let ReceiveSessionAttempt::
+        todo!();
     }
 
-    pub(crate) fn open_bidrectional_stream(&mut self) -> BidirectionalSessionAttempt {
+    pub(crate) fn open_bidrectional_stream(&mut self) -> QuicBidirectionalStreamAttempt {
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::OpenBidirectional { respond_to: send };
 
-        let attempt = BidirectionalSessionAttempt(QuicBidirectionalStreamAttempt::new(
-            self.runtime.clone(),
-            rec,
-            self.parent_id,
-        ));
+        let attempt = BidirectionalStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
 
         // Just ignore channel errors, they'll get handled in the attempt regardless
         let _send_res = self.conn_command_channel.blocking_send(cmd);
 
         attempt
-    }
-
-    pub(crate) fn accept_receive_stream(&mut self) -> ReceiveSessionAttempt {
-        todo!()
-
-        /* let conn_task = self
-            .runtime
-            .spawn(accept_receive_task(self.connection.clone()));
-
-        ReceiveSessionAttempt(
-            QuicReceiveStreamAttempt::new(self.runtime.clone(), conn_task),
-            self.generate_stream_id(),
-        ) */
     }
 
     /// Returns true if the connection is still open.
@@ -328,6 +316,7 @@ impl ConnectionTask {
 
                         break 'connected;
                     }
+                    ConnectionCommand::Accept { respond_to } => todo!(),
                 }
             }
         }

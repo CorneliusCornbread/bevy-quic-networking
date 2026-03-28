@@ -9,16 +9,14 @@ use crate::{
     common::{
         QuicParentId,
         attempt::{QuicActionError, TaskError},
-        stream::{
-            QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
-        },
+        stream::{BidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream},
     },
     server::marker::QuicServerMarker,
 };
 
 #[derive(Component)]
 #[require(QuicServerMarker)]
-pub struct QuicServerBidirectionalStreamAttempt(QuicBidirectionalStreamAttempt);
+pub struct QuicServerBidirectionalStreamAttempt(BidirectionalStreamAttempt);
 
 impl QuicServerBidirectionalStreamAttempt {
     pub fn new(
@@ -26,7 +24,7 @@ impl QuicServerBidirectionalStreamAttempt {
         conn_task: oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
         parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicBidirectionalStreamAttempt::new(
+        Self(BidirectionalStreamAttempt::new(
             handle, conn_task, parent_id,
         ))
     }
