@@ -2,27 +2,19 @@ use bevy::{
     log::{tracing::Instrument, warn},
     prelude::{Deref, DerefMut},
 };
-use s2n_quic::{
-    Connection,
-    connection::Error as ConnectionError,
-    stream::{BidirectionalStream, PeerStream, ReceiveStream},
-};
-use std::{error::Error, sync::Arc, time::Duration};
+use s2n_quic::{Connection, connection::Error as ConnectionError, stream::PeerStream};
+use std::sync::Arc;
 use tokio::{
     runtime::Handle,
-    sync::{Mutex, mpsc, oneshot},
+    sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::timeout,
 };
 
 use crate::common::{
     QuicParentId,
     attempt::{QuicActionAttempt, TaskError},
     connection::{disconnect::ConnectionDisconnectReason, task_state::ConnectionTaskState},
-    stream::{
-        BidirectionalStreamAttempt, QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt,
-        id::StreamId, receive::QuicReceiveStream, send::QuicSendStream,
-    },
+    stream::{QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream},
 };
 
 pub mod disconnect;
@@ -94,8 +86,11 @@ impl QuicConnection {
             );
         }
 
-        // TODO: change spans to have more unique information for each instance
-        let span = bevy::log::info_span!("quic_connection_task", connection_id = connection.id());
+        let span = bevy::log::info_span!(
+            "quic_connection_task",
+            parent_id = %parent_id,
+            connection_id = connection.id(),
+        );
 
         let task = ConnectionTask {
             connection,
@@ -120,7 +115,7 @@ impl QuicConnection {
         todo!()
     }
 
-    pub(crate) fn accept_receive_stream(&mut self) -> ReceiveSessionAttempt {
+    pub(crate) fn accept_receive_stream(&mut self) -> Result<QuicReceiveStream, StreamPollError> {
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
@@ -143,7 +138,8 @@ impl QuicConnection {
 
         let cmd = ConnectionCommand::OpenBidirectional { respond_to: send };
 
-        let attempt = BidirectionalStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+        let attempt =
+            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
 
         // Just ignore channel errors, they'll get handled in the attempt regardless
         let _send_res = self.conn_command_channel.blocking_send(cmd);
