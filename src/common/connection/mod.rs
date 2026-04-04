@@ -14,7 +14,10 @@ use crate::common::{
     QuicParentId,
     attempt::{QuicActionAttempt, TaskError},
     connection::{disconnect::ConnectionDisconnectReason, task_state::ConnectionTaskState},
-    stream::{QuicBidirectionalStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream},
+    stream::{
+        QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt, receive::QuicReceiveStream,
+        send::QuicSendStream,
+    },
 };
 
 pub mod disconnect;
@@ -115,7 +118,9 @@ impl QuicConnection {
         todo!()
     }
 
-    pub(crate) fn accept_receive_stream(&mut self) -> Result<QuicReceiveStream, StreamPollError> {
+    pub(crate) fn accept_receive_stream(
+        &mut self,
+    ) -> Result<QuicReceiveStreamAttempt, StreamPollError> {
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
