@@ -26,7 +26,11 @@ pub mod plugin;
 pub mod runtime;
 pub mod task_state;
 
-const CONNECTION_CHANNEL_SIZE: usize = 1024;
+/// Number of messages that can sit unhandled by the connection task
+const CONNECTION_CTRL_CHANNEL_SIZE: usize = 1024;
+/// Number of accepted but Bevy-level pending peer streams
+const NEW_STREAM_CHANNEL_SIZE: usize = 32;
+
 const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
 const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
 
@@ -66,6 +70,7 @@ pub struct QuicConnection {
     runtime: Handle,
     task_state: ConnectionTaskState,
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
+    new_streams: mpsc::Receiver<PeerStream>,
     parent_id: QuicParentId,
     id: u64,
 }
@@ -80,7 +85,8 @@ impl QuicConnection {
 
         let res = connection.keep_alive(true);
 
-        let (send, rec) = mpsc::channel(CONNECTION_CHANNEL_SIZE);
+        let (send, rec) = mpsc::channel(CONNECTION_CTRL_CHANNEL_SIZE);
+        let (new_stream_send, new_stream_rec) = mpsc::channel(NEW_STREAM_CHANNEL_SIZE);
 
         if let Err(e) = res {
             warn!(
@@ -98,6 +104,7 @@ impl QuicConnection {
         let task = ConnectionTask {
             connection,
             cmd_receiver: rec,
+            new_stream_send,
             disconnect_flag: None,
             parent_id,
         };
@@ -108,6 +115,7 @@ impl QuicConnection {
             runtime: runtime.clone(),
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
+            new_streams: new_stream_rec,
             parent_id,
             id,
         }
@@ -182,6 +190,7 @@ impl QuicConnection {
 struct ConnectionTask {
     connection: Connection,
     cmd_receiver: mpsc::Receiver<ConnectionCommand>,
+    new_stream_send: mpsc::Sender<PeerStream>,
     disconnect_flag: Option<ConnectionDisconnectReason>,
     parent_id: QuicParentId,
 }
