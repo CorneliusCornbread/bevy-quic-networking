@@ -3,7 +3,7 @@ use bevy::{
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::{Connection, connection::Error as ConnectionError, stream::PeerStream};
-use std::sync::Arc;
+use std::{error::Error, fmt, sync::Arc};
 use tokio::{
     runtime::Handle,
     sync::{mpsc, oneshot},
@@ -199,7 +199,7 @@ impl ConnectionTask {
     pub(crate) async fn start(mut self) -> ConnectionDisconnectReason {
         let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
 
-        'connected: loop {
+        while self.disconnect_flag.is_none() {
             let count = self
                 .cmd_receiver
                 .recv_many(&mut cmd_buf, CONNECTION_CMD_BUFF_SIZE_MAX)
@@ -324,14 +324,17 @@ impl ConnectionTask {
                             );
                         }
 
-                        break 'connected;
+                        self.disconnect_flag = Some(ConnectionDisconnectReason::UserClosed);
                     }
                     ConnectionCommand::Accept { respond_to } => todo!(),
                 }
             }
         }
 
-        ConnectionDisconnectReason::UserClosed
+        self.disconnect_flag
+            .unwrap_or(ConnectionDisconnectReason::InternalError(Arc::new(
+                MissingErrorData,
+            )))
     }
 }
 
@@ -340,3 +343,17 @@ pub enum StreamPollError {
     None,
     Error(TaskError),
 }
+
+#[derive(Debug)]
+pub struct MissingErrorData;
+
+impl fmt::Display for MissingErrorData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Connection task exited without a given reason. This is a bug!"
+        )
+    }
+}
+
+impl Error for MissingErrorData {}
