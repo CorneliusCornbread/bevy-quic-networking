@@ -41,12 +41,6 @@ enum ConnectionCommand {
     OpenSend {
         respond_to: oneshot::Sender<Result<QuicSendStream, TaskError>>,
     },
-    AcceptReceive {
-        respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, TaskError>>,
-    },
-    Accept {
-        respond_to: oneshot::Sender<Result<Option<PeerStream>, TaskError>>,
-    },
     CloseConnection {
         error_code: s2n_quic::application::Error,
     },
@@ -70,7 +64,7 @@ pub struct QuicConnection {
     runtime: Handle,
     task_state: ConnectionTaskState,
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
-    new_streams: mpsc::Receiver<PeerStream>,
+    incoming_streams: mpsc::Receiver<PeerStream>,
     parent_id: QuicParentId,
     id: u64,
 }
@@ -115,32 +109,28 @@ impl QuicConnection {
             runtime: runtime.clone(),
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
-            new_streams: new_stream_rec,
+            incoming_streams: new_stream_rec,
             parent_id,
             id,
         }
     }
 
     // TODO: make the return type for this more sane
-    pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), StreamPollError> {
+    pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), NewStreamError> {
         todo!()
     }
 
     pub(crate) fn accept_receive_stream(
         &mut self,
-    ) -> Result<QuicReceiveStreamAttempt, StreamPollError> {
-        let (send, rec) = oneshot::channel();
+    ) -> Result<Option<QuicReceiveStreamAttempt>, TaskError> {
+        let channel_res = self.incoming_streams.try_recv();
 
-        let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
-
-        self.conn_command_channel.blocking_send(cmd);
-
-        let stream_res = rec
-            .blocking_recv()
-            .map_err(|e| StreamPollError::Error(TaskError::TaskFailed(Arc::new(e))))?;
-
-        let stream: Result<Option<QuicReceiveStream>, StreamPollError> =
-            stream_res.map_err(|e| StreamPollError::Error(e));
+        if let Err(e) = channel_res {
+            match e {
+                mpsc::error::TryRecvError::Empty => return Ok(None),
+                mpsc::error::TryRecvError::Disconnected => return TaskError::,
+            }
+        }
 
         //let ReceiveSessionAttempt::
         todo!();
@@ -339,9 +329,9 @@ impl ConnectionTask {
 }
 
 #[derive(Debug)]
-pub enum StreamPollError {
-    None,
-    Error(TaskError),
+pub enum NewStreamError {
+    /// The async channel for receiving new streams was closed.
+    AsyncChannelClosed,
 }
 
 #[derive(Debug)]
