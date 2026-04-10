@@ -41,6 +41,12 @@ enum ConnectionCommand {
     OpenSend {
         respond_to: oneshot::Sender<Result<QuicSendStream, TaskError>>,
     },
+    AcceptReceive {
+        respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, TaskError>>,
+    },
+    Accept {
+        respond_to: oneshot::Sender<Result<Option<PeerStream>, TaskError>>,
+    },
     CloseConnection {
         error_code: s2n_quic::application::Error,
     },
@@ -64,7 +70,7 @@ pub struct QuicConnection {
     runtime: Handle,
     task_state: ConnectionTaskState,
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
-    incoming_streams: mpsc::Receiver<PeerStream>,
+    new_streams: mpsc::Receiver<PeerStream>,
     parent_id: QuicParentId,
     id: u64,
 }
@@ -109,7 +115,7 @@ impl QuicConnection {
             runtime: runtime.clone(),
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
-            incoming_streams: new_stream_rec,
+            new_streams: new_stream_rec,
             parent_id,
             id,
         }
@@ -122,15 +128,19 @@ impl QuicConnection {
 
     pub(crate) fn accept_receive_stream(
         &mut self,
-    ) -> Result<Option<QuicReceiveStreamAttempt>, TaskError> {
-        let channel_res = self.incoming_streams.try_recv();
+    ) -> Result<QuicReceiveStreamAttempt, NewStreamError> {
+        let (send, rec) = oneshot::channel();
 
-        if let Err(e) = channel_res {
-            match e {
-                mpsc::error::TryRecvError::Empty => return Ok(None),
-                mpsc::error::TryRecvError::Disconnected => return TaskError::,
-            }
-        }
+        let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
+
+        self.conn_command_channel.blocking_send(cmd);
+
+        let stream_res = rec
+            .blocking_recv()
+            .map_err(|e| NewStreamError::Error(TaskError::TaskFailed(Arc::new(e))))?;
+
+        let stream: Result<Option<QuicReceiveStream>, NewStreamError> =
+            stream_res.map_err(|e| NewStreamError::Error(e));
 
         //let ReceiveSessionAttempt::
         todo!();
@@ -330,8 +340,7 @@ impl ConnectionTask {
 
 #[derive(Debug)]
 pub enum NewStreamError {
-    /// The async channel for receiving new streams was closed.
-    AsyncChannelClosed,
+    Error(TaskError),
 }
 
 #[derive(Debug)]
