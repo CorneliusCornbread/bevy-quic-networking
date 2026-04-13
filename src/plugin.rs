@@ -2,6 +2,8 @@ use bevy::app::Plugin;
 
 use crate::common::connection::runtime::TokioRuntime;
 
+pub const DEFAULT_TICK_RATE: u16 = 64;
+
 pub struct QuicAsyncPlugin {
     tick_rate: u16,
 }
@@ -15,7 +17,7 @@ impl Plugin for QuicAsyncPlugin {
 impl Default for QuicAsyncPlugin {
     fn default() -> Self {
         Self {
-            tick_rate: bevy_transport::config::DEFAULT_TICK_RATE,
+            tick_rate: DEFAULT_TICK_RATE,
         }
     }
 }

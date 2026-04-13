@@ -24,7 +24,7 @@ pub struct QuicReceiveStreamAttempt(QuicActionAttempt<Option<QuicReceiveStream>>
 impl QuicReceiveStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: JoinHandle<Result<Option<QuicReceiveStream>, TaskError>>,
+        conn_task: oneshot::Receiver<Result<Option<QuicReceiveStream>, TaskError>>,
         parent_id: QuicParentId,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task, parent_id))
@@ -37,7 +37,7 @@ pub struct QuicSendStreamAttempt(QuicActionAttempt<QuicSendStream>);
 impl QuicSendStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: JoinHandle<Result<QuicSendStream, TaskError>>,
+        conn_task: oneshot::Receiver<Result<QuicSendStream, TaskError>>,
         parent_id: QuicParentId,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task, parent_id))

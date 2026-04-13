@@ -16,7 +16,7 @@ use crate::{
     common::{
         QuicParentId,
         attempt::TaskError,
-        connection::{NewStreamError, QuicConnection, QuicConnectionAttempt},
+        connection::{ConnectionCommandError, QuicConnection, QuicConnectionAttempt},
     },
 };
 
@@ -55,7 +55,7 @@ impl QuicClientConnection {
     /// Called to accept any pending streams manually. Should only be done
     /// if you're using a plugin setup which doesn't use the default accepters.
     //TODO: make our own "PeerStream" enum with the parent Id embedded
-    pub fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), NewStreamError> {
+    pub fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), ConnectionCommandError> {
         self.connection.accept_streams()
     }
 

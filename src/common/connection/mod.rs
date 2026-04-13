@@ -1,12 +1,24 @@
+use aeronet_io::connection::DisconnectReason;
 use bevy::{
-    log::{tracing::Instrument, warn},
+    log::{
+        error,
+        tracing::{self, Instrument, instrument},
+        warn,
+    },
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::{Connection, connection::Error as ConnectionError, stream::PeerStream};
 use std::{error::Error, fmt, sync::Arc};
+use thiserror::Error;
 use tokio::{
     runtime::Handle,
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{
+            self,
+            error::{SendError, TrySendError},
+        },
+        oneshot,
+    },
     task::JoinHandle,
 };
 
@@ -28,27 +40,28 @@ pub mod task_state;
 
 /// Number of messages that can sit unhandled by the connection task
 const CONNECTION_CTRL_CHANNEL_SIZE: usize = 1024;
-/// Number of accepted but Bevy-level pending peer streams
-const NEW_STREAM_CHANNEL_SIZE: usize = 32;
 
 const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
 const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
 
+type OpenResponse<T> = Result<T, TaskError>;
+type AcceptResponse<T> = Result<Option<T>, TaskError>;
+
 enum ConnectionCommand {
     OpenBidirectional {
-        respond_to: oneshot::Sender<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
+        respond_to: oneshot::Sender<OpenResponse<(QuicReceiveStream, QuicSendStream)>>,
     },
     OpenSend {
-        respond_to: oneshot::Sender<Result<QuicSendStream, TaskError>>,
+        respond_to: oneshot::Sender<OpenResponse<QuicSendStream>>,
     },
     AcceptReceive {
-        respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, TaskError>>,
+        respond_to: oneshot::Sender<AcceptResponse<QuicReceiveStream>>,
     },
     AcceptBidirectional {
-        respond_to: oneshot::Sender<Result<Option<(QuicReceiveStream, QuicSendStream)>, TaskError>>,
+        respond_to: oneshot::Sender<AcceptResponse<(QuicReceiveStream, QuicSendStream)>>,
     },
     Accept {
-        respond_to: oneshot::Sender<Result<Option<PeerStream>, TaskError>>,
+        respond_to: oneshot::Sender<AcceptResponse<PeerStream>>,
     },
     CloseConnection {
         error_code: s2n_quic::application::Error,
@@ -121,20 +134,26 @@ impl QuicConnection {
     }
 
     // TODO: make the return type for this more sane
-    pub(crate) fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), NewStreamError> {
+    pub fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), ConnectionCommandError> {
         todo!()
     }
 
-    pub(crate) fn accept_receive_stream(
+    #[tracing::instrument(fields(id = self.id, parent_id = %self.parent_id))]
+    pub fn accept_receive_stream(
         &mut self,
-    ) -> Result<QuicReceiveStreamAttempt, NewStreamError> {
+    ) -> Result<QuicReceiveStreamAttempt, ConnectionCommandError> {
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
+        let res = self.conn_command_channel.try_send(cmd);
 
-        self.conn_command_channel.blocking_send(cmd);
+        if let Err(err) = res {
+            return Err(err.into());
+        }
 
-        todo!();
+        let attempt = QuicReceiveStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+
+        Ok(attempt)
     }
 
     pub(crate) fn open_bidrectional_stream(&mut self) -> QuicBidirectionalStreamAttempt {
@@ -152,6 +171,7 @@ impl QuicConnection {
     }
 
     /// Returns true if the connection is still open.
+    /// NOTE: this may be slightly delayed
     pub fn is_open(&mut self) -> bool {
         todo!()
 
@@ -237,7 +257,7 @@ impl ConnectionTask {
 
     async fn open_bidirectional(
         &mut self,
-        respond_to: oneshot::Sender<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
+        respond_to: oneshot::Sender<OpenResponse<(QuicReceiveStream, QuicSendStream)>>,
     ) {
         let bidir_res = self.connection.open_bidirectional_stream().await;
 
@@ -258,6 +278,8 @@ impl ConnectionTask {
                 }
             }
             Err(err) => {
+                todo!();
+
                 let send_err = respond_to
                     .send(Err(TaskError::ConnectionFailed(err)))
                     .is_err();
@@ -272,7 +294,7 @@ impl ConnectionTask {
         };
     }
 
-    async fn open_send(&mut self, respond_to: oneshot::Sender<Result<QuicSendStream, TaskError>>) {
+    async fn open_send(&mut self, respond_to: oneshot::Sender<OpenResponse<QuicSendStream>>) {
         let send_res = self.connection.open_send_stream().await;
 
         match send_res {
@@ -303,7 +325,7 @@ impl ConnectionTask {
 
     async fn accept_receive(
         &mut self,
-        respond_to: oneshot::Sender<Result<Option<QuicReceiveStream>, TaskError>>,
+        respond_to: oneshot::Sender<AcceptResponse<QuicReceiveStream>>,
     ) {
         // TODO: this will block until we get a stream
         // we need a way to avoid blocking our async task
@@ -340,16 +362,32 @@ impl ConnectionTask {
 
     async fn accept_bidirectional(
         &mut self,
-        respond_to: oneshot::Sender<Result<Option<(QuicReceiveStream, QuicSendStream)>, TaskError>>,
+        respond_to: oneshot::Sender<AcceptResponse<(QuicReceiveStream, QuicSendStream)>>,
     ) {
         todo!();
     }
 }
 
-#[derive(Debug)]
-pub enum NewStreamError {
-    NoNewStream,
-    Error(TaskError),
+/// Errors that arise when communicaitons with the async connection task fail.
+#[derive(Debug, Error, Clone, Copy)]
+pub enum ConnectionCommandError {
+    /// The communication channel for the async task is full.
+    #[error("The communication channel for the async connection task is full.")]
+    Full,
+    /// The communication channel for the async task has been closed.
+    ///
+    /// This is likely due to the async task for the connection quitting unexpectedly.
+    #[error("The communication channel for the async connection task has been closed.")]
+    Closed,
+}
+
+impl<T> From<TrySendError<T>> for ConnectionCommandError {
+    fn from(value: TrySendError<T>) -> Self {
+        match value {
+            TrySendError::Full(_) => Self::Full,
+            TrySendError::Closed(_) => Self::Closed,
+        }
+    }
 }
 
 #[derive(Debug)]
