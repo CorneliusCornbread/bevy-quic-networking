@@ -64,7 +64,7 @@ impl QuicClientConnection {
     /// Returns a tuple including the stream attempt and a unique StreamId.
     pub fn open_bidrectional_stream(&mut self) -> QuicClientBidirectionalStreamAttempt {
         QuicClientBidirectionalStreamAttempt::from_attempt(
-            self.connection.open_bidrectional_stream(),
+            self.connection.open_bidrectional_stream().unwrap(),
         )
     }
 

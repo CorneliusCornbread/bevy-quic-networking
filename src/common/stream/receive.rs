@@ -1,5 +1,5 @@
 use aeronet_io::packet::RecvPacket;
-use bevy::log::{error, info, tracing::Instrument, warn};
+use bevy::log::{error, info, tracing::{self, Instrument}, warn};
 use bytes::Bytes;
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
@@ -54,12 +54,11 @@ impl QuicReceiveStream {
             receive_errors: receive_error_sender,
             disconnect_flag: None,
             addr,
+            parent_id,
             id: stream_id,
         };
 
-        // TODO: attach stream ID to span
-        let span = bevy::log::info_span!("quic_rec_task");
-        let rec_task = runtime.spawn(task.start().instrument(span));
+        let rec_task = runtime.spawn(task.start());
         let task_state = StreamTaskState::new(runtime, rec_task);
 
         Self {
@@ -136,21 +135,24 @@ enum RecControlMessage {
 }
 
 struct RecTask {
-    pub(crate) rec: ReceiveStream,
-    pub(crate) control: Receiver<RecControlMessage>,
-    pub(crate) inbound_sender: Sender<RecvPacket>,
-    pub(crate) receive_errors: Sender<Box<dyn Error + Send + Sync>>,
-    pub(crate) disconnect_flag: Option<StreamDisconnectReason>,
-    pub(crate) addr: AddrResult,
-    pub(crate) id: u64,
+    rec: ReceiveStream,
+    control: Receiver<RecControlMessage>,
+    inbound_sender: Sender<RecvPacket>,
+    receive_errors: Sender<Box<dyn Error + Send + Sync>>,
+    disconnect_flag: Option<StreamDisconnectReason>,
+    addr: AddrResult,
+    parent_id: QuicParentId,
+    id: u64,
 }
 
 impl RecTask {
+    #[tracing::instrument(
+        name = "quic_rec_task"
+        skip(self), 
+        fields(stream_id = self.id, parent_id = %self.parent_id, remote_address = ?self.addr)
+    )]
     async fn start(mut self) -> StreamDisconnectReason {
-        info!(
-            "Opened receive stream from: {:?}, with ID: {}",
-            self.addr, self.id
-        );
+        info!("Receive stream opened.");
 
         let mut read_buf: [Bytes; INBOUND_BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
 
@@ -175,10 +177,7 @@ impl RecTask {
                         }
                     }
                     else {
-                        info!(
-                            "Receive control channel is closed. Closing receive stream from: {:?}, with ID: {}",
-                            self.addr, self.id
-                        );
+                        info!("Receive control channel is closed, closing receive stream.");
                         self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed {
                             channel_name: "Control channel".into()
                         })
@@ -204,10 +203,7 @@ impl RecTask {
             self.transfer_payload_data(packet);
         }
 
-        info!(
-            "Receive stream from: {:?}, with ID: {}, has been closed",
-            self.addr, self.id
-        );
+        info!("Receive stream has been closed");
 
         if let Some(reason) = self.disconnect_flag {
             return reason;
@@ -274,16 +270,11 @@ impl RecTask {
 
         match inbound_err {
             mpsc::error::TrySendError::Full(_) => {
-                error!(
-                    "The inbound receive channel from: {:?}, with ID: {}, is full. The message received will be dropped.",
-                    self.addr, self.id
-                );
+                error!("The inbound receive channel, is full. The message received will be dropped.");
             }
             mpsc::error::TrySendError::Closed(_) => {
-                warn!(
-                    "The inbound receive channel from: {:?}, with ID: {}, is closed. The message received will be dropped and the stream will be closed.",
-                    self.addr, self.id
-                );
+                warn!("The inbound receive channel, is closed. The message received will be dropped and the stream will be closed.");
+
                 self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed {
                     channel_name: "Inbound receive channel".into(),
                 });

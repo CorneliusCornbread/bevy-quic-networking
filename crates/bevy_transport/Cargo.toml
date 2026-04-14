@@ -1,8 +1,0 @@
-[package]
-name = "bevy_transport"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-bevy = "0.16.0"
-bytes = "1.10.0"

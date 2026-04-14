@@ -1,4 +1,4 @@
-use bevy::log::tracing::Instrument;
+use bevy::log::tracing::{self, Instrument};
 use bevy::log::{error, info, warn};
 use bytes::Bytes;
 use s2n_quic::stream::SendStream;
@@ -51,11 +51,11 @@ impl QuicSendStream {
             send_errors: send_error_sender,
             disconnect_flag: None,
             addr,
+            parent_id,
             id: stream_id,
         };
 
-        let span = bevy::log::info_span!("quic_send_task");
-        let send_task = runtime.spawn(task.start().instrument(span));
+        let send_task = runtime.spawn(task.start());
         let task_state = StreamTaskState::new(runtime, send_task);
 
         Self {
@@ -144,20 +144,25 @@ impl QuicSendStream {
 }
 
 struct SendTask {
-    pub(crate) send: SendStream,
-    pub(crate) control: Receiver<SendControlMessage>,
-    pub(crate) outbound_receiver: Receiver<Bytes>,
-    pub(crate) send_errors: Sender<Box<dyn Error + Send + Sync>>,
-    pub(crate) disconnect_flag: Option<StreamDisconnectReason>,
-    pub(crate) addr: AddrResult,
-    pub(crate) id: u64,
+    send: SendStream,
+    control: Receiver<SendControlMessage>,
+    outbound_receiver: Receiver<Bytes>,
+    send_errors: Sender<Box<dyn Error + Send + Sync>>,
+    disconnect_flag: Option<StreamDisconnectReason>,
+    addr: AddrResult,
+    parent_id: QuicParentId,
+    id: u64,
 }
 
 impl SendTask {
+    #[tracing::instrument(
+        name = "quic_send_task"
+        skip(self), 
+        fields(stream_id = self.id, parent_id = %self.parent_id, remote_address = ?self.addr)
+    )]
     async fn start(mut self) -> StreamDisconnectReason {
         info!(
-            "Opened send stream from: {:?}, with ID: {}",
-            self.addr, self.id
+            "Send stream opened."
         );
 
         let mut send_buf = Vec::with_capacity(MIN_OUTBOUND_BUF_SIZE);
@@ -168,8 +173,7 @@ impl SendTask {
                     // channel closed
                     if count == 0 {
                         warn!(
-                            "Outbound send channel is closed. Closing send stream from: {:?}, with ID: {}",
-                            self.addr, self.id
+                            "Outbound send channel was closed by the remote peer."
                         );
 
                         self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed{channel_name: "Outbound channel".into()})
@@ -183,8 +187,8 @@ impl SendTask {
                             s2n_quic::stream::Error::InvalidStream { source, .. }
                             | s2n_quic::stream::Error::SendAfterFinish { source, .. } => {
                                 error!(
-                                    "Send stream from: {:?}, ID: {}, is in an invalid state:\n{}",
-                                    self.addr, self.id, source
+                                    "Send stream is in an invalid state, quitting:\n{}",
+                                    source
                                 );
                                 self.disconnect_flag = Some(StreamDisconnectReason::InvalidStream)
                             }
@@ -193,16 +197,16 @@ impl SendTask {
                                 error, source: _, ..
                             } => {
                                 error!(
-                                    "Send stream from: {:?}, ID: {}, has encountered a stream reset:\n{}",
-                                    self.addr, self.id, error
+                                    "Send stream has encountered a stream reset:\n{}",
+                                    error
                                 );
                                 self.disconnect_flag = Some(StreamDisconnectReason::Reset(error));
                             }
 
                             _ => {
                                 error!(
-                                    "Send stream from: {:?}, ID: {}, error:\n{}",
-                                    self.addr, self.id, err
+                                    "Send stream error:\n{}",
+                                    err
                                 );
                             }
                         }
@@ -219,8 +223,8 @@ impl SendTask {
 
                                 if let Err(e) = res {
                                     error!(
-                                        "Send stream from: {:?}, ID: {}, errored when closing stream:\n{}",
-                                        self.addr, self.id, e
+                                        "Send stream errored when closing stream:\n{}",
+                                        e
                                     );
 
                                     self.send_errors.try_send(Box::new(e)).handle_err();
@@ -234,8 +238,8 @@ impl SendTask {
 
                                 if let Err(e) = res {
                                     error!(
-                                        "Send stream from: {:?}, ID: {}, errored when flushing stream:\n{}",
-                                        self.addr, self.id, e
+                                        "Send stream errored when flushing stream:\n{}",
+                                        e
                                     );
 
                                     self.send_errors.try_send(Box::new(e)).handle_err();
@@ -246,8 +250,7 @@ impl SendTask {
                     else {
                         // Control channel has been dropped
                         info!(
-                            "Control channel for send stream ID: {} has been dropped. Quitting...",
-                            self.id
+                            "Control channel has been dropped. Quitting...",
                         );
                         self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed{channel_name: "Control channel".into()})
                     };
@@ -260,16 +263,15 @@ impl SendTask {
         }
 
         info!(
-            "Send stream from: {:?}, with ID: {}, has been closed",
-            self.addr, self.id
+            "Send stream has been closed",
         );
 
         let dropped_count = self.outbound_receiver.len();
 
         if dropped_count > 0 {
             warn!(
-                "Send stream ID: {} dropped {} messages, this will result in loss of data being sent",
-                self.id, dropped_count
+                "Send stream dropped {} messages, this will result in loss of data being sent",
+                dropped_count
             )
         }
 

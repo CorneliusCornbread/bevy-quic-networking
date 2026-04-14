@@ -1,9 +1,7 @@
 use aeronet_io::connection::DisconnectReason;
 use bevy::{
     log::{
-        error,
-        tracing::{self, Instrument, instrument},
-        warn,
+        error, info, tracing::{self, Instrument, instrument}, warn
     },
     prelude::{Deref, DerefMut},
 };
@@ -91,15 +89,17 @@ pub struct QuicConnection {
 }
 
 impl QuicConnection {
+    #[tracing::instrument(
+        name = "new_quic_connection"
+        skip(runtime),
+    )]
     pub(crate) fn new(
         runtime: Handle,
         mut connection: Connection,
         parent_id: QuicParentId,
     ) -> Self {
         let id = connection.id();
-
         let res = connection.keep_alive(true);
-
         let (send, rec) = mpsc::channel(CONNECTION_CTRL_CHANNEL_SIZE);
 
         if let Err(e) = res {
@@ -109,12 +109,6 @@ impl QuicConnection {
             );
         }
 
-        let span = bevy::log::info_span!(
-            "quic_connection_task",
-            parent_id = %parent_id,
-            connection_id = connection.id(),
-        );
-
         let task = ConnectionTask {
             connection,
             cmd_receiver: rec,
@@ -122,7 +116,7 @@ impl QuicConnection {
             parent_id,
         };
 
-        let handle = runtime.spawn(task.start().instrument(span));
+        let handle = runtime.spawn(task.start());
 
         Self {
             runtime: runtime.clone(),
@@ -138,16 +132,15 @@ impl QuicConnection {
         todo!()
     }
 
-    #[tracing::instrument(fields(id = self.id, parent_id = %self.parent_id))]
     pub fn accept_receive_stream(
         &mut self,
     ) -> Result<QuicReceiveStreamAttempt, ConnectionCommandError> {
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
-        let res = self.conn_command_channel.try_send(cmd);
+        let send_res = self.conn_command_channel.try_send(cmd);
 
-        if let Err(err) = res {
+        if let Err(err) = send_res {
             return Err(err.into());
         }
 
@@ -156,18 +149,22 @@ impl QuicConnection {
         Ok(attempt)
     }
 
-    pub(crate) fn open_bidrectional_stream(&mut self) -> QuicBidirectionalStreamAttempt {
+    pub fn open_bidrectional_stream(
+        &mut self,
+    ) -> Result<QuicBidirectionalStreamAttempt, ConnectionCommandError> {
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::OpenBidirectional { respond_to: send };
+        let send_res = self.conn_command_channel.try_send(cmd);
+
+        if let Err(err) = send_res {
+            return Err(err.into());
+        }
 
         let attempt =
             QuicBidirectionalStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
 
-        // Just ignore channel errors, they'll get handled in the attempt regardless
-        let _send_res = self.conn_command_channel.blocking_send(cmd);
-
-        attempt
+        Ok(attempt)
     }
 
     /// Returns true if the connection is still open.
@@ -198,6 +195,7 @@ impl QuicConnection {
     }
 }
 
+#[derive(Debug)]
 struct ConnectionTask {
     connection: Connection,
     cmd_receiver: mpsc::Receiver<ConnectionCommand>,
@@ -206,7 +204,14 @@ struct ConnectionTask {
 }
 
 impl ConnectionTask {
-    pub(crate) async fn start(mut self) -> ConnectionDisconnectReason {
+    #[tracing::instrument(
+        name = "quic_connection_task"
+        skip(self), 
+        fields(connection_id = self.connection.id(), parent_id = %self.parent_id, remote_address = ?self.connection.remote_addr())
+    )]
+    async fn start(mut self) -> ConnectionDisconnectReason {
+        info!("New connection opened");
+
         let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
 
         while self.disconnect_flag.is_none() {
