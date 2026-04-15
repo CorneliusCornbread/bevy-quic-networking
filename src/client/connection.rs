@@ -16,7 +16,10 @@ use crate::{
     common::{
         QuicParentId,
         attempt::TaskError,
-        connection::{ConnectionCommandError, QuicConnection, QuicConnectionAttempt},
+        connection::{
+            ConnectionCommandError, QuicConnection, QuicConnectionAttempt,
+            disconnect::ConnectionDisconnectReason,
+        },
     },
 };
 
@@ -85,7 +88,7 @@ impl QuicClientConnection {
 
     /// Gets the disconnect reason if the stream has closed.
     /// Returns `None` if the stream is still open.
-    pub fn get_disconnect_reason(&mut self) -> Option<ConnectionError> {
+    pub fn get_disconnect_reason(&mut self) -> Option<ConnectionDisconnectReason> {
         self.connection.get_disconnect_reason()
     }
 }

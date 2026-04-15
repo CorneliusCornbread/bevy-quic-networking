@@ -157,13 +157,11 @@ struct SendTask {
 impl SendTask {
     #[tracing::instrument(
         name = "quic_send_task"
-        skip(self), 
+        skip(self),
         fields(stream_id = self.id, parent_id = %self.parent_id, remote_address = ?self.addr)
     )]
     async fn start(mut self) -> StreamDisconnectReason {
-        info!(
-            "Send stream opened."
-        );
+        info!("Send stream opened.");
 
         let mut send_buf = Vec::with_capacity(MIN_OUTBOUND_BUF_SIZE);
 
@@ -262,9 +260,7 @@ impl SendTask {
             }
         }
 
-        info!(
-            "Send stream has been closed",
-        );
+        info!("Send stream has been closed",);
 
         let dropped_count = self.outbound_receiver.len();
 

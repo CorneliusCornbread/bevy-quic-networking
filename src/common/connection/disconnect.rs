@@ -1,6 +1,6 @@
-use std::{error::Error, sync::Arc};
-
 use aeronet_io::{anyhow::anyhow, connection::DisconnectReason};
+use s2n_quic::connection::Error as ConnectionError;
+use std::{error::Error, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub enum ConnectionDisconnectReason {
@@ -38,5 +38,24 @@ impl From<ConnectionDisconnectReason> for DisconnectReason {
                 "Connection was closed due to an internal error: {error}"
             )),
         }
+    }
+}
+
+pub trait ConnectionErrorDisconnected {
+    /// Returns `true` if this error represents a closed or unrecoverable connection.
+    fn is_closed(&self) -> bool;
+}
+
+impl ConnectionErrorDisconnected for ConnectionError {
+    fn is_closed(&self) -> bool {
+        matches!(
+            self,
+            ConnectionError::Closed { .. }
+                | ConnectionError::Transport { .. }
+                | ConnectionError::Application { .. }
+                | ConnectionError::EndpointClosing { .. }
+                | ConnectionError::IdleTimerExpired { .. }
+                | ConnectionError::NoValidPath { .. }
+        )
     }
 }

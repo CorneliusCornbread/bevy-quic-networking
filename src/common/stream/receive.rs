@@ -1,5 +1,9 @@
 use aeronet_io::packet::RecvPacket;
-use bevy::log::{error, info, tracing::{self, Instrument}, warn};
+use bevy::log::{
+    error, info,
+    tracing::{self, Instrument},
+    warn,
+};
 use bytes::Bytes;
 use s2n_quic::application::Error as ErrorCode;
 use s2n_quic::stream::ReceiveStream;
@@ -148,7 +152,7 @@ struct RecTask {
 impl RecTask {
     #[tracing::instrument(
         name = "quic_rec_task"
-        skip(self), 
+        skip(self),
         fields(stream_id = self.id, parent_id = %self.parent_id, remote_address = ?self.addr)
     )]
     async fn start(mut self) -> StreamDisconnectReason {
@@ -270,10 +274,14 @@ impl RecTask {
 
         match inbound_err {
             mpsc::error::TrySendError::Full(_) => {
-                error!("The inbound receive channel, is full. The message received will be dropped.");
+                error!(
+                    "The inbound receive channel, is full. The message received will be dropped."
+                );
             }
             mpsc::error::TrySendError::Closed(_) => {
-                warn!("The inbound receive channel, is closed. The message received will be dropped and the stream will be closed.");
+                warn!(
+                    "The inbound receive channel, is closed. The message received will be dropped and the stream will be closed."
+                );
 
                 self.disconnect_flag = Some(StreamDisconnectReason::MspcChannelClosed {
                     channel_name: "Inbound receive channel".into(),

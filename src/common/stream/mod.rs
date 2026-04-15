@@ -56,3 +56,6 @@ impl QuicBidirectionalStreamAttempt {
         Self(QuicActionAttempt::new(handle, conn_task, parent_id))
     }
 }
+
+#[derive(Component)]
+pub enum QuicPeerStreamAttempt {}
