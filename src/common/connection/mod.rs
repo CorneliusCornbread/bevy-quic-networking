@@ -193,6 +193,11 @@ impl QuicConnection {
     pub fn parent_id(&self) -> QuicParentId {
         self.parent_id
     }
+
+    // TODO: Create type for connection IDs
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 #[derive(Debug)]
@@ -260,7 +265,9 @@ impl ConnectionTask {
                     ConnectionCommand::AcceptBidirectional { respond_to } => {
                         self.accept_bidirectional(respond_to).await;
                     }
-                    ConnectionCommand::Accept { respond_to } => todo!(),
+                    ConnectionCommand::Accept { respond_to } => {
+                        self.accept(respond_to).await;
+                    }
                     ConnectionCommand::CloseConnection { error_code } => {
                         self.connection.close(error_code);
 
@@ -408,7 +415,48 @@ impl ConnectionTask {
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
     ) -> Result<(), ConnectionError> {
-        todo!();
+        let accept_res = self.connection.accept_bidirectional_stream().await;
+
+        match accept_res {
+            Ok(rec_opt) => {
+                let mapped = rec_opt.map(|bidir_stream| {
+                    let (rec, send) = bidir_stream.split();
+
+                    let quic_rec = QuicReceiveStream::new(Handle::current(), rec, self.parent_id);
+                    let quic_send = QuicSendStream::new(Handle::current(), send, self.parent_id);
+
+                    (quic_rec, quic_send)
+                });
+
+                let send_err = respond_to.send(Ok(mapped)).is_err();
+
+                if send_err {
+                    warn!(
+                        "Bidrectional stream opened with the response handler being closed before it could be sent.",
+                    );
+                }
+            }
+            Err(err) => {
+                let send_err = respond_to
+                    .send(Err(TaskError::ConnectionFailed(err)))
+                    .is_err();
+
+                if send_err {
+                    warn!(
+                        "Opened bidirectional stream errored with the response handler being closed before it could be sent: {0}",
+                        err
+                    );
+                }
+
+                if err.is_closed() {
+                    self.is_open.store(false, Ordering::Relaxed);
+                }
+
+                return Err(err);
+            }
+        }
+
+        Ok(())
     }
 
     async fn accept(

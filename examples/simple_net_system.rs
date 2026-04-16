@@ -159,9 +159,16 @@ fn add_debug(
 
 // Output our current message count with the data of the message itself.
 // Also log any outstanding errors from our receive stream.
+#[allow(clippy::type_complexity)]
 fn debug_receive(
-    server_receivers: Query<(&mut QuicReceiveStream, &mut DebugCount), With<QuicServerMarker>>,
-    client_receivers: Query<&mut QuicReceiveStream, With<QuicClientMarker>>,
+    server_receivers: Query<
+        (&mut QuicReceiveStream, &mut DebugCount),
+        (With<QuicServerMarker>, Without<QuicClientMarker>),
+    >,
+    client_receivers: Query<
+        &mut QuicReceiveStream,
+        (With<QuicClientMarker>, Without<QuicServerMarker>),
+    >,
 ) {
     for (mut stream, mut debug) in server_receivers {
         stream.log_outstanding_errors();
@@ -188,8 +195,14 @@ fn debug_receive(
 
 // Log any outstanding errors from our streams
 fn debug_send(
-    server_receivers: Query<&mut QuicSendStream, With<QuicServerMarker>>,
-    client_receivers: Query<&mut QuicSendStream, With<QuicClientMarker>>,
+    server_receivers: Query<
+        &mut QuicSendStream,
+        (With<QuicServerMarker>, Without<QuicClientMarker>),
+    >,
+    client_receivers: Query<
+        &mut QuicSendStream,
+        (With<QuicClientMarker>, Without<QuicServerMarker>),
+    >,
 ) {
     for mut stream in server_receivers {
         stream.log_outstanding_errors();
