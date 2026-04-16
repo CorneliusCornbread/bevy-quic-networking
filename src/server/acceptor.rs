@@ -3,25 +3,20 @@ use bevy::{
     ecs::{
         entity::Entity,
         hierarchy::ChildOf,
-        system::{Commands, Query, Res},
+        query::With,
+        system::{Commands, Query},
     },
-    log::error,
+    log::{error, tracing},
 };
-use s2n_quic::stream::PeerStream;
 
 use crate::{
-    common::{connection::runtime::TokioRuntime, stream::session::QuicSession},
-    server::{
-        QuicServer,
-        connection::QuicServerConnection,
-        marker::QuicServerMarker,
-        stream::{QuicServerReceiveStream, QuicServerSendStream},
-    },
+    common::connection::QuicConnection,
+    server::{QuicServer, marker::QuicServerMarker},
 };
 
 /// This plugin makes servers automatically accept all incoming
 /// connections and streams and spawns them as components parented
-/// to their [QuicServer]s and [QuicServerConnection]s in the ECS world.
+/// to their [QuicServer]s and [QuicConnection]s in the ECS world.
 #[derive(Debug)]
 pub struct SimpleServerAcceptorPlugin;
 
@@ -56,32 +51,27 @@ fn accept_connections(mut commands: Commands, servers: Query<(&mut QuicServer, E
 
 fn accept_streams(
     mut commands: Commands,
-    connection_query: Query<(Entity, &mut QuicServerConnection)>,
-    tokio: Res<TokioRuntime>,
+    connection_query: Query<(Entity, &mut QuicConnection), With<QuicServerMarker>>,
 ) {
-    let handle = tokio.handle();
-
     for (connection_entity, mut connection) in connection_query {
-        if let Ok((stream, parent_id)) = connection.accept_streams() {
-            match stream {
-                PeerStream::Bidirectional(bidirectional_stream) => {
-                    let (rec, send) = bidirectional_stream.split();
-                    let quic_rec = QuicServerReceiveStream::new(handle.clone(), rec, parent_id);
-                    let quic_send = QuicServerSendStream::new(handle.clone(), send, parent_id);
+        handle_stream_accept(&mut commands, connection_entity, &mut connection);
+    }
+}
 
-                    commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, quic_send, QuicServerMarker, QuicSession));
-                    });
-                }
-                PeerStream::Receive(receive_stream) => {
-                    let quic_rec =
-                        QuicServerReceiveStream::new(handle.clone(), receive_stream, parent_id);
-
-                    commands.entity(connection_entity).with_children(|parent| {
-                        parent.spawn((quic_rec, QuicServerMarker, QuicSession));
-                    });
-                }
-            }
+#[tracing::instrument(name = "accept_server_stream", skip_all, fields(parent_id = %connection.parent_id()))]
+fn handle_stream_accept(
+    commands: &mut Commands,
+    connection_entity: Entity,
+    connection: &mut QuicConnection,
+) {
+    match connection.accept_stream() {
+        Ok(peer_attempt) => {
+            commands.entity(connection_entity).with_children(|parent| {
+                parent.spawn((peer_attempt, QuicServerMarker));
+            });
+        }
+        Err(err) => {
+            error!("Error accepting stream from connection: {}", err);
         }
     }
 }

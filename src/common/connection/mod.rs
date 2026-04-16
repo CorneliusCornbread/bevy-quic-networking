@@ -1,4 +1,5 @@
 use bevy::{
+    ecs::component::Component,
     log::{
         info,
         tracing::{self},
@@ -33,8 +34,8 @@ use crate::common::{
         task_state::ConnectionTaskState,
     },
     stream::{
-        QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt, receive::QuicReceiveStream,
-        send::QuicSendStream,
+        QuicBidirectionalStreamAttempt, QuicPeerStream, QuicPeerStreamAttempt,
+        QuicReceiveStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
     },
 };
 
@@ -50,31 +51,31 @@ const CONNECTION_CTRL_CHANNEL_SIZE: usize = 1024;
 const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
 const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
 
-type OpenResponse<T> = Result<T, TaskError>;
-type AcceptResponse<T> = Result<Option<T>, TaskError>;
+type ConnectionResponse<T> = Result<Option<T>, TaskError>;
 
 enum ConnectionCommand {
     OpenBidirectional {
-        respond_to: oneshot::Sender<OpenResponse<(QuicReceiveStream, QuicSendStream)>>,
+        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
     },
     OpenSend {
-        respond_to: oneshot::Sender<OpenResponse<QuicSendStream>>,
+        respond_to: oneshot::Sender<ConnectionResponse<QuicSendStream>>,
     },
     AcceptReceive {
-        respond_to: oneshot::Sender<AcceptResponse<QuicReceiveStream>>,
+        respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
     },
     AcceptBidirectional {
-        respond_to: oneshot::Sender<AcceptResponse<(QuicReceiveStream, QuicSendStream)>>,
+        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
     },
     Accept {
-        respond_to: oneshot::Sender<AcceptResponse<PeerStream>>,
+        respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
     },
     CloseConnection {
         error_code: s2n_quic::application::Error,
     },
 }
 
-#[derive(Deref, DerefMut)]
+#[derive(Deref, DerefMut, Component)]
+#[component(storage = "SparseSet")]
 pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
 
 impl QuicConnectionAttempt {
@@ -87,7 +88,7 @@ impl QuicConnectionAttempt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Component)]
 pub struct QuicConnection {
     runtime: Handle,
     task_state: ConnectionTaskState,
@@ -122,15 +123,25 @@ impl QuicConnection {
             runtime: runtime.clone(),
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
-            open_flag: open_flag,
+            open_flag,
             parent_id,
             id,
         }
     }
 
-    // TODO: make the return type for this more sane
-    pub fn accept_streams(&mut self) -> Result<(PeerStream, QuicParentId), ConnectionCommandError> {
-        todo!()
+    pub fn accept_stream(&mut self) -> Result<QuicPeerStreamAttempt, ConnectionCommandError> {
+        let (send, rec) = oneshot::channel();
+
+        let cmd = ConnectionCommand::Accept { respond_to: send };
+        let send_res = self.conn_command_channel.try_send(cmd);
+
+        if let Err(err) = send_res {
+            return Err(err.into());
+        }
+
+        let attempt = QuicPeerStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+
+        Ok(attempt)
     }
 
     pub fn accept_receive_stream(
@@ -177,6 +188,10 @@ impl QuicConnection {
     /// Returns `None` if the stream is still open.
     pub fn get_disconnect_reason(&mut self) -> Option<ConnectionDisconnectReason> {
         self.task_state.get_disconnect_reason()
+    }
+
+    pub fn parent_id(&self) -> QuicParentId {
+        self.parent_id
     }
 }
 
@@ -269,7 +284,7 @@ impl ConnectionTask {
 
     async fn open_bidirectional(
         &mut self,
-        respond_to: oneshot::Sender<OpenResponse<(QuicReceiveStream, QuicSendStream)>>,
+        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
     ) -> Result<(), ConnectionError> {
         let bidir_res = self.connection.open_bidirectional_stream().await;
 
@@ -281,7 +296,7 @@ impl ConnectionTask {
                 let quic_rec =
                     QuicReceiveStream::new(Handle::current(), rec_stream, self.parent_id);
 
-                let send_err = respond_to.send(Ok((quic_rec, quic_send))).is_err();
+                let send_err = respond_to.send(Ok(Some((quic_rec, quic_send)))).is_err();
 
                 if send_err {
                     warn!(
@@ -310,14 +325,14 @@ impl ConnectionTask {
 
     async fn open_send(
         &mut self,
-        respond_to: oneshot::Sender<OpenResponse<QuicSendStream>>,
+        respond_to: oneshot::Sender<ConnectionResponse<QuicSendStream>>,
     ) -> Result<(), ConnectionError> {
         let send_res = self.connection.open_send_stream().await;
 
         match send_res {
             Ok(stream) => {
                 let quic_send = QuicSendStream::new(Handle::current(), stream, self.parent_id);
-                let send_err = respond_to.send(Ok(quic_send)).is_err();
+                let send_err = respond_to.send(Ok(Some(quic_send))).is_err();
 
                 if send_err {
                     warn!(
@@ -346,8 +361,8 @@ impl ConnectionTask {
 
     async fn accept_receive(
         &mut self,
-        respond_to: oneshot::Sender<AcceptResponse<QuicReceiveStream>>,
-    ) {
+        respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
+    ) -> Result<(), ConnectionError> {
         // TODO: this will block until we get a stream
         // we need a way to avoid blocking our async task
         let accept_res = self.connection.accept_receive_stream().await;
@@ -381,15 +396,64 @@ impl ConnectionTask {
                 if err.is_closed() {
                     self.is_open.store(false, Ordering::Relaxed);
                 }
+
+                return Err(err);
             }
         }
+
+        Ok(())
     }
 
     async fn accept_bidirectional(
         &mut self,
-        respond_to: oneshot::Sender<AcceptResponse<(QuicReceiveStream, QuicSendStream)>>,
-    ) {
+        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
+    ) -> Result<(), ConnectionError> {
         todo!();
+    }
+
+    async fn accept(
+        &mut self,
+        respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
+    ) -> Result<(), ConnectionError> {
+        // TODO: this will block until we get a stream
+        // we need a way to avoid blocking our async task
+        let accept_res = self.connection.accept().await;
+
+        match accept_res {
+            Ok(rec_opt) => {
+                let mapped = rec_opt.map(|rec_stream| {
+                    QuicPeerStream::new(Handle::current(), rec_stream, self.parent_id)
+                });
+
+                let send_err = respond_to.send(Ok(mapped)).is_err();
+
+                if send_err {
+                    warn!(
+                        "Accept stream opened with the response handler being closed before it could be sent.",
+                    );
+                }
+            }
+            Err(err) => {
+                let send_err = respond_to
+                    .send(Err(TaskError::ConnectionFailed(err)))
+                    .is_err();
+
+                if send_err {
+                    warn!(
+                        "Opened send stream errored with the response handler being closed before it could be sent: {0}",
+                        err
+                    );
+                }
+
+                if err.is_closed() {
+                    self.is_open.store(false, Ordering::Relaxed);
+                }
+
+                return Err(err);
+            }
+        }
+
+        Ok(())
     }
 }
 

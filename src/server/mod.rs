@@ -8,16 +8,14 @@ use tokio::{runtime::Handle, sync::Mutex, task::JoinError};
 use crate::{
     common::{
         QuicParentId, QuicParentType,
-        connection::{id::ConnectionId, runtime::TokioRuntime},
+        connection::{QuicConnection, id::ConnectionId, runtime::TokioRuntime},
         id::IdGenerator,
     },
-    server::{connection::QuicServerConnection, marker::QuicServerMarker},
+    server::marker::QuicServerMarker,
 };
 
 pub mod acceptor;
-pub mod connection;
 pub mod marker;
-pub mod stream;
 
 /// The component which manages an instance of a QuicServer.
 ///
@@ -26,7 +24,7 @@ pub mod stream;
 #[require(QuicServerMarker)]
 pub struct QuicServer {
     runtime: Handle,
-    server: Arc<Mutex<Server>>,
+    server: Server,
     id: QuicParentId,
 }
 
@@ -44,11 +42,9 @@ impl QuicServer {
         let handle = runtime.handle().clone();
         let server = runtime.block_on(build_server(bind_ip, certificate, private_key))?;
 
-        let server_mutex = Arc::new(Mutex::new(server));
-
         Ok(Self {
             runtime: handle,
-            server: server_mutex,
+            server,
             id: QuicParentId::generate_unique(QuicParentType::Server),
         })
     }
@@ -61,14 +57,12 @@ impl QuicServer {
         let waker = Arc::new(futures::task::noop_waker_ref());
         let mut cx = std::task::Context::from_waker(&waker);
 
-        let mut lock = self.server.blocking_lock();
-        let poll = lock.poll_accept(&mut cx);
-        drop(lock);
+        let poll = self.server.poll_accept(&mut cx);
 
         match poll {
             std::task::Poll::Ready(conn_opt) => {
                 if let Some(conn) = conn_opt {
-                    let ret = ConnectionPoll::NewConnection(QuicServerConnection::new(
+                    let ret = ConnectionPoll::NewConnection(QuicConnection::new(
                         self.runtime.clone(),
                         conn,
                         self.id,
@@ -95,7 +89,7 @@ impl QuicServer {
 pub enum ConnectionPoll {
     None,
     ServerClosed,
-    NewConnection(QuicServerConnection),
+    NewConnection(QuicConnection),
 }
 
 async fn build_server<C: IntoCertificate, PK: IntoPrivateKey>(

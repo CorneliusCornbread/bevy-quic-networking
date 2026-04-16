@@ -9,7 +9,7 @@ use bevy::{
         component::Component,
         entity::Entity,
         hierarchy::{ChildOf, Children},
-        query::Without,
+        query::{With, Without},
         schedule::IntoScheduleConfigs,
         system::{Commands, Query, Res},
     },
@@ -24,16 +24,12 @@ use bevy::{
 };
 use bevy_quic_networking::{
     QuicDefaultPlugins,
-    client::{
-        QuicClient,
-        connection::QuicClientConnection,
-        stream::{QuicClientReceiveStream, QuicClientSendStream},
+    client::{QuicClient, marker::QuicClientMarker},
+    common::{
+        connection::{QuicConnection, runtime::TokioRuntime},
+        stream::{receive::QuicReceiveStream, send::QuicSendStream},
     },
-    common::connection::runtime::TokioRuntime,
-    server::{
-        QuicServer,
-        stream::{QuicServerReceiveStream, QuicServerSendStream},
-    },
+    server::{QuicServer, marker::QuicServerMarker},
 };
 use s2n_quic::client::Connect;
 use std::{net::SocketAddr, path::Path};
@@ -114,20 +110,28 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
 #[derive(Component)]
 struct DebugCount(u64);
 
+#[allow(clippy::type_complexity)]
 fn client_open_stream(
     mut commands: Commands,
-    connection_query: Query<(Entity, &mut QuicClientConnection), Without<Children>>,
+    connection_query: Query<
+        (Entity, &mut QuicConnection),
+        (Without<Children>, With<QuicClientMarker>),
+    >,
 ) {
     // As soon as we see a connection without any children,
     // attempt to spawn a bidirectional stream on the client end.
     // Both servers and clients may open streams.
     for (entity, mut connection) in connection_query {
-        let stream_bundle = connection.open_bidrectional_stream();
+        let stream_bundle = connection
+            .open_bidrectional_stream()
+            .expect("Unable to open new client stream");
         commands.spawn((stream_bundle, DebugCount(0), ChildOf(entity)));
     }
 }
 
-fn client_send(client_streams: Query<(&mut QuicClientSendStream, &mut DebugCount)>) {
+fn client_send(
+    client_streams: Query<(&mut QuicSendStream, &mut DebugCount), With<QuicClientMarker>>,
+) {
     // As soon as we see an open client stream send a message when this system is run
     // (only when spacebar is pressed)
     for (mut send_stream, mut debug_count) in client_streams {
@@ -146,7 +150,7 @@ fn client_send(client_streams: Query<(&mut QuicClientSendStream, &mut DebugCount
 // Keeps track of the number of messages sent and received
 fn add_debug(
     mut commands: Commands,
-    query: Query<(Entity, &QuicServerReceiveStream), Without<DebugCount>>,
+    query: Query<(Entity, &QuicReceiveStream), (Without<DebugCount>, With<QuicServerMarker>)>,
 ) {
     for (entity, _stream) in &query {
         commands.entity(entity).insert(DebugCount(0));
@@ -156,8 +160,8 @@ fn add_debug(
 // Output our current message count with the data of the message itself.
 // Also log any outstanding errors from our receive stream.
 fn debug_receive(
-    server_receivers: Query<(&mut QuicServerReceiveStream, &mut DebugCount)>,
-    client_receivers: Query<&mut QuicClientReceiveStream>,
+    server_receivers: Query<(&mut QuicReceiveStream, &mut DebugCount), With<QuicServerMarker>>,
+    client_receivers: Query<&mut QuicReceiveStream, With<QuicClientMarker>>,
 ) {
     for (mut stream, mut debug) in server_receivers {
         stream.log_outstanding_errors();
@@ -184,8 +188,8 @@ fn debug_receive(
 
 // Log any outstanding errors from our streams
 fn debug_send(
-    server_receivers: Query<&mut QuicServerSendStream>,
-    client_receivers: Query<&mut QuicClientSendStream>,
+    server_receivers: Query<&mut QuicSendStream, With<QuicServerMarker>>,
+    client_receivers: Query<&mut QuicSendStream, With<QuicClientMarker>>,
 ) {
     for mut stream in server_receivers {
         stream.log_outstanding_errors();
@@ -196,13 +200,13 @@ fn debug_send(
     }
 }
 
-fn stop_receive(receivers: Query<&mut QuicServerReceiveStream>) {
+fn stop_receive(receivers: Query<&mut QuicReceiveStream, With<QuicServerMarker>>) {
     for mut stream in receivers {
         stream.stop_send(0u8.into());
     }
 }
 
-fn close_send(senders: Query<&mut QuicClientSendStream>) {
+fn close_send(senders: Query<&mut QuicSendStream, With<QuicClientMarker>>) {
     for mut stream in senders {
         stream.close();
     }

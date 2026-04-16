@@ -51,11 +51,11 @@ impl<T> TaskResult<T> for JoinHandle<Result<T, TaskError>> {
 }
 
 pub struct QuicActionAttempt<T> {
-    pub(crate) runtime: Handle,
-    pub(crate) task_res: Box<dyn TaskResult<T> + Send + Sync>,
+    runtime: Handle,
+    task_res: Box<dyn TaskResult<T> + Send + Sync>,
     /// A flag checking if the action state has returned a success value already
-    pub(crate) returned_value: Option<QuicActionError>,
-    pub(crate) parent_id: QuicParentId,
+    returned_value: Option<QuicActionError>,
+    parent_id: QuicParentId,
 }
 
 impl<T> QuicActionAttempt<T> {

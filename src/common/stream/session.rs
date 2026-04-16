@@ -5,13 +5,12 @@ use aeronet_io::{
 use bevy::{
     app::{Plugin, PostUpdate, PreUpdate, Startup},
     ecs::{entity::Entity, observer::On, system::Commands, world::World},
+    log::tracing,
 };
 use std::time::Instant;
 
-use crate::{
-    client::stream::{QuicClientReceiveStream, QuicClientSendStream},
-    common::stream::disconnect::StreamDisconnectReason,
-    server::stream::{QuicServerReceiveStream, QuicServerSendStream},
+use crate::common::stream::{
+    disconnect::StreamDisconnectReason, receive::QuicReceiveStream, send::QuicSendStream,
 };
 use bevy::{
     ecs::{component::Component, query::With, system::Query},
@@ -52,7 +51,7 @@ pub struct QuicAeronetPacketPlugin;
 
 impl Plugin for QuicAeronetPacketPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(PreUpdate, (drain_recv_packets, drain_send_packets));
+        app.add_systems(PreUpdate, (aeronet_session_recv, aeronet_session_send));
     }
 }
 
@@ -66,20 +65,14 @@ impl Plugin for QuicAeronetEventPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.add_systems(
             PostUpdate,
-            (
-                fire_server_send_disconnect_events,
-                fire_server_rec_disconnect_events,
-                fire_client_send_disconnect_events,
-                fire_client_rec_disconnect_events,
-            ),
+            (fire_rec_disconnect_events, fire_send_disconnect_events),
         )
         .add_systems(Startup, add_disconnect_handler);
     }
 }
 
-fn drain_recv_packets(
-    query: Query<(&mut Session, &mut QuicServerReceiveStream), With<QuicSession>>,
-) {
+#[tracing::instrument(skip_all)]
+fn aeronet_session_recv(query: Query<(&mut Session, &mut QuicReceiveStream), With<QuicSession>>) {
     let mut buffer = Vec::new();
 
     for entity in query {
@@ -110,7 +103,8 @@ fn drain_recv_packets(
     }
 }
 
-fn drain_send_packets(query: Query<(&mut Session, &mut QuicClientSendStream), With<QuicSession>>) {
+#[tracing::instrument(skip_all)]
+fn aeronet_session_send(query: Query<(&mut Session, &mut QuicSendStream), With<QuicSession>>) {
     for entity in query {
         let (mut session, mut send) = entity;
         let parent_id = send.parent_id();
@@ -128,9 +122,9 @@ fn drain_send_packets(query: Query<(&mut Session, &mut QuicClientSendStream), Wi
     }
 }
 
-fn fire_server_send_disconnect_events(
+fn fire_send_disconnect_events(
     mut cmd: Commands,
-    query: Query<(&mut QuicServerReceiveStream, Entity), With<Session>>,
+    query: Query<(&mut QuicReceiveStream, Entity), With<Session>>,
 ) {
     for (mut rec, entity) in query {
         if let Some(reason) = rec.get_disconnect_reason() {
@@ -139,34 +133,12 @@ fn fire_server_send_disconnect_events(
     }
 }
 
-fn fire_server_rec_disconnect_events(
+fn fire_rec_disconnect_events(
     mut cmd: Commands,
-    query: Query<(&mut QuicServerSendStream, Entity), With<Session>>,
+    query: Query<(&mut QuicSendStream, Entity), With<Session>>,
 ) {
-    for (mut rec, entity) in query {
-        if let Some(reason) = rec.get_disconnect_reason() {
-            fire_disconnect(&mut cmd, entity, reason);
-        }
-    }
-}
-
-fn fire_client_send_disconnect_events(
-    mut cmd: Commands,
-    query: Query<(&mut QuicClientSendStream, Entity), With<Session>>,
-) {
-    for (mut rec, entity) in query {
-        if let Some(reason) = rec.get_disconnect_reason() {
-            fire_disconnect(&mut cmd, entity, reason);
-        }
-    }
-}
-
-fn fire_client_rec_disconnect_events(
-    mut cmd: Commands,
-    query: Query<(&mut QuicClientReceiveStream, Entity), With<Session>>,
-) {
-    for (mut rec, entity) in query {
-        if let Some(reason) = rec.get_disconnect_reason() {
+    for (mut send, entity) in query {
+        if let Some(reason) = send.get_disconnect_reason() {
             fire_disconnect(&mut cmd, entity, reason);
         }
     }
@@ -182,29 +154,15 @@ fn fire_disconnect(cmd: &mut Commands, entity: Entity, reason: StreamDisconnectR
 fn add_disconnect_handler(world: &mut World) {
     world.add_observer(
         |event: On<Disconnect>,
-         server_rec_query: Query<(&mut QuicServerReceiveStream, Entity)>,
-         server_send_query: Query<(&mut QuicServerSendStream, Entity)>,
-         client_rec_query: Query<(&mut QuicClientReceiveStream, Entity)>,
-         client_send_query: Query<(&mut QuicClientSendStream, Entity)>| {
-            for (mut stream, entity) in server_rec_query {
+         rec_query: Query<(&mut QuicReceiveStream, Entity)>,
+         send_query: Query<(&mut QuicSendStream, Entity)>| {
+            for (mut stream, entity) in rec_query {
                 if entity == event.entity {
                     stream.stop_send(AERONET_DISCONNECT_CODE.into());
                 }
             }
 
-            for (mut stream, entity) in client_rec_query {
-                if entity == event.entity {
-                    stream.stop_send(AERONET_DISCONNECT_CODE.into());
-                }
-            }
-
-            for (mut stream, entity) in client_send_query {
-                if entity == event.entity {
-                    stream.close();
-                }
-            }
-
-            for (mut stream, entity) in server_send_query {
+            for (mut stream, entity) in send_query {
                 if entity == event.entity {
                     stream.close();
                 }

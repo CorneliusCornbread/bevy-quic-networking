@@ -4,24 +4,21 @@ use bevy::ecs::component::Component;
 use s2n_quic::{
     Client, Connection,
     client::{Connect, ConnectionAttempt},
-    connection::Error as ConnectionError,
 };
 use s2n_quic_tls::{certificate::IntoCertificate, error::Error as TlsError};
 use tokio::{runtime::Handle, sync::Mutex};
 
 use crate::{
-    client::{connection::QuicClientConnectionAttempt, marker::QuicClientMarker},
+    client::marker::QuicClientMarker,
     common::{
         QuicParentId, QuicParentType,
         attempt::TaskError,
-        connection::{id::ConnectionId, runtime::TokioRuntime},
+        connection::{QuicConnectionAttempt, runtime::TokioRuntime},
     },
 };
 
 pub mod acceptor;
-pub mod connection;
 pub mod marker;
-pub mod stream;
 
 #[derive(Component)]
 #[require(QuicClientMarker)]
@@ -62,13 +59,19 @@ impl QuicClient {
     }
 
     /// Opens a new connection to the given `connect` target. Returns an attempt and an ID assigned to the connection.
-    pub fn open_connection(&mut self, connect: Connect) -> QuicClientConnectionAttempt {
+    pub fn open_connection(
+        &mut self,
+        connect: Connect,
+    ) -> (QuicConnectionAttempt, QuicClientMarker) {
         let client = &self.client.blocking_lock();
         let attempt = client.connect(connect);
 
         let conn_task = self.runtime.spawn(create_connection(attempt));
 
-        QuicClientConnectionAttempt::new(self.runtime.clone(), conn_task, self.id)
+        (
+            QuicConnectionAttempt::new(self.runtime.clone(), conn_task, self.id),
+            QuicClientMarker,
+        )
     }
 }
 

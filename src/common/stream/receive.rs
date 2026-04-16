@@ -1,8 +1,11 @@
 use aeronet_io::packet::RecvPacket;
-use bevy::log::{
-    error, info,
-    tracing::{self, Instrument},
-    warn,
+use bevy::{
+    ecs::component::Component,
+    log::{
+        error, info,
+        tracing::{self},
+        warn,
+    },
 };
 use bytes::Bytes;
 use s2n_quic::application::Error as ErrorCode;
@@ -32,7 +35,7 @@ const INBOUND_CHANNEL_SIZE: usize = 128;
 /// How big the receive buffer of Bytes chunks we can receive at once is to be sent to Bevy
 const INBOUND_BUFF_SIZE: usize = 64;
 
-/// Internal structure for handling receive logic.
+#[derive(Debug, Component)]
 pub struct QuicReceiveStream {
     task_state: StreamTaskState,
     inbound_data: Receiver<RecvPacket>,

@@ -1,8 +1,9 @@
 use bevy::{
-    ecs::component::Component,
+    ecs::{component::Component, storage},
     prelude::{Deref, DerefMut},
 };
-use tokio::{runtime::Handle, sync::oneshot, task::JoinHandle};
+use s2n_quic::stream::PeerStream;
+use tokio::{runtime::Handle, sync::oneshot};
 
 use crate::common::{
     QuicParentId,
@@ -19,6 +20,7 @@ pub mod session;
 pub mod task_state;
 
 #[derive(Deref, DerefMut, Component)]
+#[component(storage = "SparseSet")]
 pub struct QuicReceiveStreamAttempt(QuicActionAttempt<Option<QuicReceiveStream>>);
 
 impl QuicReceiveStreamAttempt {
@@ -32,12 +34,13 @@ impl QuicReceiveStreamAttempt {
 }
 
 #[derive(Deref, DerefMut, Component)]
-pub struct QuicSendStreamAttempt(QuicActionAttempt<QuicSendStream>);
+#[component(storage = "SparseSet")]
+pub struct QuicSendStreamAttempt(QuicActionAttempt<Option<QuicSendStream>>);
 
 impl QuicSendStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: oneshot::Receiver<Result<QuicSendStream, TaskError>>,
+        conn_task: oneshot::Receiver<Result<Option<QuicSendStream>, TaskError>>,
         parent_id: QuicParentId,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task, parent_id))
@@ -45,17 +48,57 @@ impl QuicSendStreamAttempt {
 }
 
 #[derive(Deref, DerefMut, Component)]
-pub struct QuicBidirectionalStreamAttempt(QuicActionAttempt<(QuicReceiveStream, QuicSendStream)>);
+#[component(storage = "SparseSet")]
+pub struct QuicBidirectionalStreamAttempt(
+    QuicActionAttempt<Option<(QuicReceiveStream, QuicSendStream)>>,
+);
 
 impl QuicBidirectionalStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: oneshot::Receiver<Result<(QuicReceiveStream, QuicSendStream), TaskError>>,
+        conn_task: oneshot::Receiver<
+            Result<Option<(QuicReceiveStream, QuicSendStream)>, TaskError>,
+        >,
         parent_id: QuicParentId,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, conn_task, parent_id))
     }
 }
 
-#[derive(Component)]
-pub enum QuicPeerStreamAttempt {}
+#[derive(Component, Deref, DerefMut)]
+#[component(storage = "SparseSet")]
+pub struct QuicPeerStreamAttempt(QuicActionAttempt<Option<QuicPeerStream>>);
+
+impl QuicPeerStreamAttempt {
+    pub fn new(
+        handle: Handle,
+        conn_task: oneshot::Receiver<Result<Option<QuicPeerStream>, TaskError>>,
+        parent_id: QuicParentId,
+    ) -> Self {
+        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
+    }
+}
+
+pub enum QuicPeerStream {
+    Bidirectional(QuicReceiveStream, QuicSendStream),
+    Receive(QuicReceiveStream),
+}
+
+impl QuicPeerStream {
+    pub fn new(runtime: Handle, peer_stream: PeerStream, parent_id: QuicParentId) -> Self {
+        match peer_stream {
+            PeerStream::Bidirectional(bidirectional_stream) => {
+                let (rec, send) = bidirectional_stream.split();
+                let quic_rec = QuicReceiveStream::new(runtime.clone(), rec, parent_id);
+                let quic_send = QuicSendStream::new(runtime, send, parent_id);
+
+                QuicPeerStream::Bidirectional(quic_rec, quic_send)
+            }
+            PeerStream::Receive(rec) => {
+                let quic_rec = QuicReceiveStream::new(runtime.clone(), rec, parent_id);
+
+                QuicPeerStream::Receive(quic_rec)
+            }
+        }
+    }
+}

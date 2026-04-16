@@ -4,38 +4,29 @@ use bevy::{
         entity::Entity,
         system::{Commands, Query},
     },
-    log::{error, info, info_span},
+    log::{error, info, tracing},
 };
 
-use crate::{
-    client::stream::{
-        QuicClientBidirectionalStreamAttempt, QuicClientReceiveStream, QuicClientSendStream,
-    },
-    common::{
-        attempt::QuicActionError,
-        stream::{id::StreamId, session::QuicSession},
-    },
-    server::stream::{
-        QuicServerBidirectionalStreamAttempt, QuicServerReceiveStream, QuicServerSendStream,
-    },
+use crate::common::{
+    attempt::QuicActionError,
+    stream::{QuicBidirectionalStreamAttempt, QuicReceiveStreamAttempt, session::QuicSession},
 };
 
 #[derive(Debug)]
 pub struct StreamAttemptPlugin;
 
+// TODO: create systems for send/receive versions
 impl Plugin for StreamAttemptPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        app.add_systems(Update, client_bidir_stream_attempt)
-            .add_systems(Update, server_bidir_stream_attempt);
+        app.add_systems(Update, handle_bidir_stream_attempt);
     }
 }
 
-fn client_bidir_stream_attempt(
+#[tracing::instrument(skip_all)]
+fn handle_bidir_stream_attempt(
     mut commands: Commands,
-    query: Query<(Entity, &mut QuicClientBidirectionalStreamAttempt)>,
+    query: Query<(Entity, &mut QuicBidirectionalStreamAttempt)>,
 ) {
-    let _span = info_span!("client_bidir_stream_attempt").entered();
-
     for entity_bundle in query {
         let (entity, mut attempt) = entity_bundle;
         let parent_id = attempt.parent_id();
@@ -68,36 +59,39 @@ fn client_bidir_stream_attempt(
                 error_entity.insert(err_bundle);
             }
 
-            error_entity.remove::<QuicClientBidirectionalStreamAttempt>();
+            error_entity.remove::<QuicBidirectionalStreamAttempt>();
 
             continue;
         }
 
-        let (rec, send) = res.unwrap();
-        let send_stream = QuicClientSendStream::from_send_stream(send);
-        let rec_stream = QuicClientReceiveStream::from_rec_stream(rec);
+        if let Some((rec, send)) = res.unwrap() {
+            info!("Spawning bidirectional stream with {parent_id}");
 
-        info!("Spawning bidirectional stream with {parent_id}");
-
-        commands
-            .entity(entity)
-            .remove::<QuicClientBidirectionalStreamAttempt>()
-            .insert((send_stream, rec_stream, QuicSession));
+            commands
+                .entity(entity)
+                .remove::<QuicBidirectionalStreamAttempt>()
+                .insert((rec, send, QuicSession));
+        }
+        // No new streams, delete attempt
+        else {
+            info!("No pending incoming streams, deleting attempt.");
+            commands.entity(entity).despawn();
+        }
     }
 }
 
-fn server_bidir_stream_attempt(
+#[tracing::instrument(skip_all)]
+fn handle_rec_stream_attempt(
     mut commands: Commands,
-    query: Query<(Entity, &mut QuicServerBidirectionalStreamAttempt)>,
+    query: Query<(Entity, &mut QuicReceiveStreamAttempt)>,
 ) {
-    let _span = info_span!("server_bidir_stream_attempt").entered();
-
     for entity_bundle in query {
         let (entity, mut attempt) = entity_bundle;
         let parent_id = attempt.parent_id();
 
-        let res = attempt.get_output();
+        let res = attempt.attempt_result();
 
+        // TODOL: make helper function with shmancy tracing span
         if let Err(e) = res {
             match &e {
                 QuicActionError::Pending => continue,
@@ -124,20 +118,23 @@ fn server_bidir_stream_attempt(
                 error_entity.insert(err_bundle);
             }
 
-            error_entity.remove::<QuicServerBidirectionalStreamAttempt>();
+            error_entity.remove::<QuicReceiveStreamAttempt>();
 
             continue;
         }
 
-        let (rec, send) = res.unwrap();
-        let send_stream = QuicServerSendStream::from_send_stream(send);
-        let rec_stream = QuicServerReceiveStream::from_rec_stream(rec);
+        if let Some(rec) = res.unwrap() {
+            info!("Spawning receive stream with {parent_id}");
 
-        info!("Spawning server bidirectional stream with {parent_id}");
-
-        commands
-            .entity(entity)
-            .remove::<QuicServerBidirectionalStreamAttempt>()
-            .insert((send_stream, rec_stream, QuicSession));
+            commands
+                .entity(entity)
+                .remove::<QuicReceiveStreamAttempt>()
+                .insert((rec, QuicSession));
+        }
+        // No new streams, delete attempt
+        else {
+            info!("No pending incoming streams, deleting attempt.");
+            commands.entity(entity).despawn();
+        }
     }
 }

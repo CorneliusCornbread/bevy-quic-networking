@@ -1,3 +1,4 @@
+use bevy::ecs::component::Component;
 use bevy::log::tracing::{self, Instrument};
 use bevy::log::{error, info, warn};
 use bytes::Bytes;
@@ -26,6 +27,7 @@ const MIN_OUTBOUND_BUF_SIZE: usize = 64;
 /// Maximum size of the send buffer of Bytes chunks we can receive at once is to send to bevy
 const MAX_OUTBOUND_BUF_SIZE: usize = 128;
 
+#[derive(Debug, Component)]
 pub struct QuicSendStream {
     task_state: StreamTaskState,
     outbound_data: Sender<Bytes>,
