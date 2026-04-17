@@ -24,7 +24,7 @@ pub mod marker;
 #[require(QuicClientMarker)]
 pub struct QuicClient {
     runtime: Handle,
-    client: Arc<Mutex<Client>>,
+    client: Client,
     id: QuicParentId,
 }
 
@@ -34,7 +34,7 @@ impl QuicClient {
 
         Self {
             runtime: runtime.handle().clone(),
-            client: Arc::new(Mutex::new(client)),
+            client,
             id: QuicParentId::generate_unique(QuicParentType::Client),
         }
     }
@@ -47,7 +47,7 @@ impl QuicClient {
 
         let ret = Self {
             runtime: runtime.handle().clone(),
-            client: Arc::new(Mutex::new(client)),
+            client,
             id: QuicParentId::generate_unique(QuicParentType::Client),
         };
 
@@ -63,7 +63,7 @@ impl QuicClient {
         &mut self,
         connect: Connect,
     ) -> (QuicConnectionAttempt, QuicClientMarker) {
-        let client = &self.client.blocking_lock();
+        let client = &self.client;
         let attempt = client.connect(connect);
 
         let conn_task = self.runtime.spawn(create_connection(attempt));

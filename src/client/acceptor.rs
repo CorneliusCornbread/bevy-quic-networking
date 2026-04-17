@@ -18,6 +18,8 @@ pub struct SimpleClientAcceptorPlugin;
 // TODO: probably switch this to a single acceptor for both client and server implementations
 impl Plugin for SimpleClientAcceptorPlugin {
     fn build(&self, app: &mut bevy::app::App) {
+        todo!("This needs to be reworked, this is now very broken");
+
         app.add_systems(Update, accept_streams);
     }
 }

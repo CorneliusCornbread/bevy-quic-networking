@@ -29,7 +29,7 @@ use bevy_quic_networking::{
         connection::{QuicConnection, runtime::TokioRuntime},
         stream::{receive::QuicReceiveStream, send::QuicSendStream},
     },
-    server::{QuicServer, marker::QuicServerMarker},
+    server::{ConnectionPoll, QuicServer, marker::QuicServerMarker},
 };
 use s2n_quic::client::Connect;
 use std::{net::SocketAddr, path::Path};
@@ -55,7 +55,16 @@ fn main() {
         .add_plugins(RemotePlugin::default())
         .add_plugins(RemoteHttpPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(PostUpdate, (client_open_stream, debug_receive, debug_send))
+        .add_systems(
+            PostUpdate,
+            (
+                client_open_stream,
+                debug_receive,
+                debug_send,
+                server_accept_bidirectional,
+                server_accept_connection,
+            ),
+        )
         .add_systems(
             PostUpdate,
             client_send.run_if(input_just_pressed(KeyCode::Space)),
@@ -125,7 +134,12 @@ fn client_open_stream(
         let stream_bundle = connection
             .open_bidrectional_stream()
             .expect("Unable to open new client stream");
-        commands.spawn((stream_bundle, DebugCount(0), ChildOf(entity)));
+        commands.spawn((
+            stream_bundle,
+            DebugCount(0),
+            ChildOf(entity),
+            QuicClientMarker,
+        ));
     }
 }
 
@@ -144,6 +158,44 @@ fn client_send(
         debug_count.0 += 1;
 
         info!("Message send count: {}", debug_count.0);
+    }
+}
+
+fn server_accept_connection(
+    mut commands: Commands,
+    server_query: Query<(Entity, &mut QuicServer)>,
+) {
+    for (entity, mut server) in server_query {
+        match server.accept_connection() {
+            Ok(ConnectionPoll::NewConnection(conn)) => {
+                commands.spawn((conn, QuicServerMarker, ChildOf(entity)));
+            }
+            Ok(_) => {}
+            Err(e) => error!("Error accepting server connection: {}", e),
+        }
+    }
+}
+
+fn server_accept_bidirectional(
+    mut commands: Commands,
+    connection_query: Query<
+        (Entity, &mut QuicConnection),
+        (Without<Children>, With<QuicServerMarker>),
+    >,
+) {
+    for (entity, mut connection) in connection_query {
+        info!("Accepting new stream!");
+        match connection.accept_bidirectional_stream() {
+            Ok(attempt) => {
+                commands.spawn((attempt, QuicServerMarker, ChildOf(entity)));
+            }
+            Err(err) => {
+                error!(
+                    "Error accepting bidirectional stream on server connection: {}",
+                    err
+                );
+            }
+        }
     }
 }
 

@@ -22,6 +22,7 @@ pub struct SimpleServerAcceptorPlugin;
 
 impl Plugin for SimpleServerAcceptorPlugin {
     fn build(&self, app: &mut bevy::app::App) {
+        todo!("This needs to be reworked, this is now very broken");
         app.add_systems(Update, accept_connections)
             .add_systems(Update, accept_streams);
     }

@@ -161,6 +161,24 @@ impl QuicConnection {
         Ok(attempt)
     }
 
+    pub fn accept_bidirectional_stream(
+        &mut self,
+    ) -> Result<QuicBidirectionalStreamAttempt, ConnectionCommandError> {
+        let (send, rec) = oneshot::channel();
+
+        let cmd = ConnectionCommand::AcceptBidirectional { respond_to: send };
+        let send_res = self.conn_command_channel.try_send(cmd);
+
+        if let Err(err) = send_res {
+            return Err(err.into());
+        }
+
+        let attempt =
+            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+
+        Ok(attempt)
+    }
+
     pub fn open_bidrectional_stream(
         &mut self,
     ) -> Result<QuicBidirectionalStreamAttempt, ConnectionCommandError> {
