@@ -7,13 +7,18 @@ use bevy::{
     },
     prelude::{Deref, DerefMut},
 };
-use s2n_quic::{Connection, connection::Error as ConnectionError, stream::PeerStream};
+use s2n_quic::{
+    Connection,
+    connection::{Error as ConnectionError, Handle as ConnectionHandle},
+    stream::PeerStream,
+};
 use std::{
     error::Error,
     fmt,
+    net::SocketAddr,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 use thiserror::Error;
@@ -54,12 +59,6 @@ const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
 type ConnectionResponse<T> = Result<Option<T>, TaskError>;
 
 enum ConnectionCommand {
-    OpenBidirectional {
-        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
-    },
-    OpenSend {
-        respond_to: oneshot::Sender<ConnectionResponse<QuicSendStream>>,
-    },
     AcceptReceive {
         respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
     },
@@ -68,9 +67,6 @@ enum ConnectionCommand {
     },
     Accept {
         respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
-    },
-    CloseConnection {
-        error_code: s2n_quic::application::Error,
     },
 }
 
@@ -88,12 +84,68 @@ impl QuicConnectionAttempt {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PendingStreams(Arc<AtomicUsize>);
+
+impl PendingStreams {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn increment(&self) {
+        self.0.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn decrement(&self) {
+        #[cfg(debug_assertions)]
+        {
+            let prev = self.0.fetch_sub(1, Ordering::Relaxed);
+            if prev == 0 {
+                bevy::log::error!("TaskCounter underflowed!");
+                // Correct the underflow
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        #[cfg(not(debug_assertions))]
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub fn count(&self) -> usize {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count() == 0
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OpenFlag(Arc<AtomicBool>);
+
+impl OpenFlag {
+    pub fn new(value: bool) -> Self {
+        Self(Arc::new(AtomicBool::new(value)))
+    }
+
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn set(&self, value: bool) {
+        self.0.store(value, Ordering::Relaxed)
+    }
+}
+
 #[derive(Debug, Component)]
 pub struct QuicConnection {
     runtime: Handle,
+    conn_handle: ConnectionHandle,
     task_state: ConnectionTaskState,
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
-    open_flag: Arc<AtomicBool>,
+    is_open: OpenFlag,
+    pending_streams: PendingStreams,
+    remote_addr: Option<SocketAddr>,
     parent_id: QuicParentId,
     id: u64,
 }
@@ -115,33 +167,46 @@ impl QuicConnection {
             );
         }
 
-        let open_flag = Arc::new(AtomicBool::new(true));
-        let task = ConnectionTask::new(connection, rec, parent_id, open_flag.clone());
+        let is_open = OpenFlag::new(true);
+
+        let conn_handle = connection.handle();
+
+        let task = ConnectionTask::new(connection, rec, parent_id, is_open);
         let handle = runtime.spawn(task.start());
+
+        // Turn into option for cheap asf cloning
+        let remote_addr = connection.remote_addr().ok();
 
         Self {
             runtime: runtime.clone(),
+            conn_handle: connection.handle(),
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
-            open_flag,
+            is_open,
+            pending_streams: Default::default(),
+            remote_addr,
             parent_id,
             id,
         }
     }
 
     pub fn accept_stream(&mut self) -> Result<QuicPeerStreamAttempt, ConnectionCommandError> {
-        let (send, rec) = oneshot::channel();
+        let task = ConnectionHandleTask::new(
+            self.conn_handle.clone(),
+            self.is_open.clone(),
+            self.pending_streams.clone(),
+            self.remote_addr,
+            self.parent_id,
+            self.conn_handle.id(),
+        );
 
-        let cmd = ConnectionCommand::Accept { respond_to: send };
-        let send_res = self.conn_command_channel.try_send(cmd);
+        let join = self.runtime.spawn(task.accept());
 
-        if let Err(err) = send_res {
-            return Err(err.into());
-        }
-
-        let attempt = QuicPeerStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
-
-        Ok(attempt)
+        Ok(QuicPeerStreamAttempt::new(
+            self.runtime.clone(),
+            join,
+            self.parent_id,
+        ))
     }
 
     pub fn accept_receive_stream(
@@ -199,7 +264,7 @@ impl QuicConnection {
 
     /// Returns true if the connection is still open.
     pub fn is_open(&mut self) -> bool {
-        !self.task_state.is_finished() & self.open_flag.load(Ordering::Relaxed)
+        !self.task_state.is_finished() & self.is_open.load(Ordering::Relaxed)
     }
 
     /// Gets the disconnect reason if the stream has closed.
@@ -219,98 +284,34 @@ impl QuicConnection {
 }
 
 #[derive(Debug)]
-struct ConnectionTask {
-    connection: Connection,
-    cmd_receiver: mpsc::Receiver<ConnectionCommand>,
-    disconnect_flag: Option<ConnectionDisconnectReason>,
-    is_open: Arc<AtomicBool>,
+struct ConnectionHandleTask {
+    connection: ConnectionHandle,
+    is_open: OpenFlag,
+    pending_streams: PendingStreams,
+    remote_addr: Option<SocketAddr>,
     parent_id: QuicParentId,
 }
 
-impl ConnectionTask {
+impl ConnectionHandleTask {
     fn new(
-        connection: Connection,
-        cmd_receiver: mpsc::Receiver<ConnectionCommand>,
+        connection: ConnectionHandle,
+        is_open: OpenFlag,
+        pending_streams: PendingStreams,
+        remote_addr: Option<SocketAddr>,
         parent_id: QuicParentId,
-        open_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             connection,
-            cmd_receiver,
-            disconnect_flag: None,
-            is_open: open_flag,
+            is_open,
+            pending_streams,
+            remote_addr,
             parent_id,
         }
     }
 
-    #[tracing::instrument(
-        name = "quic_connection_task"
-        skip(self),
-        fields(
-            connection_id = self.connection.id(),
-            parent_id = %self.parent_id,
-            remote_address = ?self.connection.remote_addr()
-        )
-    )]
-    async fn start(mut self) -> ConnectionDisconnectReason {
-        info!("New connection opened");
-
-        let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
-
-        while self.disconnect_flag.is_none() {
-            let count = self
-                .cmd_receiver
-                .recv_many(&mut cmd_buf, CONNECTION_CMD_BUFF_SIZE_MAX)
-                .await;
-
-            let mut processed: usize = 0;
-
-            for cmd in cmd_buf.drain(..count) {
-                processed += 1;
-
-                // TODO: use handles for these commands while running them asynchronously
-                // use join set to make sure they finish successfully
-                match cmd {
-                    ConnectionCommand::OpenBidirectional { respond_to } => {
-                        self.open_bidirectional(respond_to).await;
-                    }
-                    ConnectionCommand::OpenSend { respond_to } => {
-                        self.open_send(respond_to).await;
-                    }
-                    ConnectionCommand::AcceptReceive { respond_to } => {
-                        self.accept_receive(respond_to).await;
-                    }
-                    ConnectionCommand::AcceptBidirectional { respond_to } => {
-                        self.accept_bidirectional(respond_to).await;
-                    }
-                    ConnectionCommand::Accept { respond_to } => {
-                        self.accept(respond_to).await;
-                    }
-                    ConnectionCommand::CloseConnection { error_code } => {
-                        self.connection.close(error_code);
-
-                        if count > processed {
-                            warn!(
-                                "Connection closed with other commands unprocessed. These commands will be dropped."
-                            );
-                        }
-
-                        self.disconnect_flag = Some(ConnectionDisconnectReason::UserClosed);
-                    }
-                }
-            }
-        }
-
-        self.disconnect_flag
-            .unwrap_or(ConnectionDisconnectReason::InternalError(Arc::new(
-                MissingErrorData,
-            )))
-    }
-
     async fn open_bidirectional(
-        &mut self,
-        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
-    ) -> Result<(), ConnectionError> {
+        mut self,
+    ) -> Result<(QuicReceiveStream, QuicSendStream), ConnectionError> {
         let bidir_res = self.connection.open_bidirectional_stream().await;
 
         match bidir_res {
@@ -321,31 +322,12 @@ impl ConnectionTask {
                 let quic_rec =
                     QuicReceiveStream::new(Handle::current(), rec_stream, self.parent_id);
 
-                let send_err = respond_to.send(Ok(Some((quic_rec, quic_send)))).is_err();
-
-                if send_err {
-                    warn!(
-                        "Bidrectional stream was opened with the response handler being closed before it could be sent."
-                    );
-                }
+                return Ok((quic_rec, quic_send));
             }
             Err(err) => {
-                let send_err = respond_to
-                    .send(Err(TaskError::ConnectionFailed(err)))
-                    .is_err();
-
-                if send_err {
-                    warn!(
-                        "Opened bidrectional stream errored with the response handler being closed before it could be sent: {0}",
-                        err
-                    );
-                }
-
                 return Err(err);
             }
-        };
-
-        Ok(())
+        }
     }
 
     async fn open_send(
@@ -382,6 +364,77 @@ impl ConnectionTask {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ConnectionTask {
+    connection: Connection,
+    cmd_receiver: mpsc::Receiver<ConnectionCommand>,
+    disconnect_flag: Option<ConnectionDisconnectReason>,
+    is_open: OpenFlag,
+    parent_id: QuicParentId,
+}
+
+impl ConnectionTask {
+    fn new(
+        connection: Connection,
+        cmd_receiver: mpsc::Receiver<ConnectionCommand>,
+        parent_id: QuicParentId,
+        is_open: OpenFlag,
+    ) -> Self {
+        Self {
+            connection,
+            cmd_receiver,
+            disconnect_flag: None,
+            is_open,
+            parent_id,
+        }
+    }
+
+    #[tracing::instrument(
+        name = "quic_connection_task"
+        skip(self),
+        fields(
+            connection_id = self.connection.id(),
+            parent_id = %self.parent_id,
+            remote_address = ?self.connection.remote_addr()
+        )
+    )]
+    async fn start(mut self) -> ConnectionDisconnectReason {
+        info!("New connection opened");
+
+        let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
+
+        while self.disconnect_flag.is_none() {
+            let count = self
+                .cmd_receiver
+                .recv_many(&mut cmd_buf, CONNECTION_CMD_BUFF_SIZE_MAX)
+                .await;
+
+            let mut processed: usize = 0;
+
+            for cmd in cmd_buf.drain(..count) {
+                processed += 1;
+
+                match cmd {
+                    ConnectionCommand::AcceptReceive { respond_to } => {
+                        self.accept_receive(respond_to).await;
+                    }
+                    ConnectionCommand::AcceptBidirectional { respond_to } => {
+                        self.accept_bidirectional(respond_to).await;
+                    }
+                    ConnectionCommand::Accept { respond_to } => {
+                        self.accept(respond_to).await;
+                    }
+                }
+            }
+        }
+
+        self.disconnect_flag
+            .unwrap_or(ConnectionDisconnectReason::InternalError(Arc::new(
+                MissingErrorData,
+            )))
     }
 
     async fn accept_receive(

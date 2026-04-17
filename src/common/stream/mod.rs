@@ -1,5 +1,5 @@
 use bevy::{
-    ecs::{component::Component, storage},
+    ecs::component::Component,
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::stream::PeerStream;
