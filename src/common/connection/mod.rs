@@ -132,8 +132,12 @@ impl OpenFlag {
         self.0.load(Ordering::Relaxed)
     }
 
-    pub fn set(&self, value: bool) {
-        self.0.store(value, Ordering::Relaxed)
+    pub fn set_closed(&self) {
+        self.0.store(false, Ordering::Relaxed)
+    }
+
+    pub fn set_open(&self) {
+        self.0.store(true, Ordering::Relaxed)
     }
 }
 
@@ -145,9 +149,7 @@ pub struct QuicConnection {
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
     is_open: OpenFlag,
     pending_streams: PendingStreams,
-    remote_addr: Option<SocketAddr>,
     parent_id: QuicParentId,
-    id: u64,
 }
 
 impl QuicConnection {
@@ -156,7 +158,6 @@ impl QuicConnection {
         skip(runtime),
     )]
     pub fn new(runtime: Handle, mut connection: Connection, parent_id: QuicParentId) -> Self {
-        let id = connection.id();
         let res = connection.keep_alive(true);
         let (send, rec) = mpsc::channel(CONNECTION_CTRL_CHANNEL_SIZE);
 
@@ -168,45 +169,34 @@ impl QuicConnection {
         }
 
         let is_open = OpenFlag::new(true);
-
         let conn_handle = connection.handle();
-
-        let task = ConnectionTask::new(connection, rec, parent_id, is_open);
+        let task = ConnectionTask::new(connection, rec, parent_id, is_open.clone());
         let handle = runtime.spawn(task.start());
-
-        // Turn into option for cheap asf cloning
-        let remote_addr = connection.remote_addr().ok();
 
         Self {
             runtime: runtime.clone(),
-            conn_handle: connection.handle(),
+            conn_handle,
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
             is_open,
             pending_streams: Default::default(),
-            remote_addr,
             parent_id,
-            id,
         }
     }
 
     pub fn accept_stream(&mut self) -> Result<QuicPeerStreamAttempt, ConnectionCommandError> {
-        let task = ConnectionHandleTask::new(
-            self.conn_handle.clone(),
-            self.is_open.clone(),
-            self.pending_streams.clone(),
-            self.remote_addr,
-            self.parent_id,
-            self.conn_handle.id(),
-        );
+        let (send, rec) = oneshot::channel();
 
-        let join = self.runtime.spawn(task.accept());
+        let cmd = ConnectionCommand::Accept { respond_to: send };
+        let send_res = self.conn_command_channel.try_send(cmd);
 
-        Ok(QuicPeerStreamAttempt::new(
-            self.runtime.clone(),
-            join,
-            self.parent_id,
-        ))
+        if let Err(err) = send_res {
+            return Err(err.into());
+        }
+
+        let attempt = QuicPeerStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+
+        Ok(attempt)
     }
 
     pub fn accept_receive_stream(
@@ -247,24 +237,25 @@ impl QuicConnection {
     pub fn open_bidrectional_stream(
         &mut self,
     ) -> Result<QuicBidirectionalStreamAttempt, ConnectionCommandError> {
-        let (send, rec) = oneshot::channel();
+        let task = ConnectionHandleTask::new(
+            self.conn_handle.clone(),
+            self.is_open.clone(),
+            self.pending_streams.clone(),
+            self.parent_id,
+        );
 
-        let cmd = ConnectionCommand::OpenBidirectional { respond_to: send };
-        let send_res = self.conn_command_channel.try_send(cmd);
+        let join = self.runtime.spawn(task.open_bidirectional());
 
-        if let Err(err) = send_res {
-            return Err(err.into());
-        }
-
-        let attempt =
-            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
-
-        Ok(attempt)
+        Ok(QuicBidirectionalStreamAttempt::new(
+            self.runtime.clone(),
+            join,
+            self.parent_id,
+        ))
     }
 
     /// Returns true if the connection is still open.
     pub fn is_open(&mut self) -> bool {
-        !self.task_state.is_finished() & self.is_open.load(Ordering::Relaxed)
+        !self.task_state.is_finished() && self.is_open.get()
     }
 
     /// Gets the disconnect reason if the stream has closed.
@@ -279,7 +270,7 @@ impl QuicConnection {
 
     // TODO: Create type for connection IDs
     pub fn id(&self) -> u64 {
-        self.id
+        self.conn_handle.id()
     }
 }
 
@@ -288,7 +279,7 @@ struct ConnectionHandleTask {
     connection: ConnectionHandle,
     is_open: OpenFlag,
     pending_streams: PendingStreams,
-    remote_addr: Option<SocketAddr>,
+    remote_addr: Result<SocketAddr, ConnectionError>,
     parent_id: QuicParentId,
 }
 
@@ -297,9 +288,10 @@ impl ConnectionHandleTask {
         connection: ConnectionHandle,
         is_open: OpenFlag,
         pending_streams: PendingStreams,
-        remote_addr: Option<SocketAddr>,
         parent_id: QuicParentId,
     ) -> Self {
+        let remote_addr = connection.remote_addr();
+
         Self {
             connection,
             is_open,
@@ -309,9 +301,10 @@ impl ConnectionHandleTask {
         }
     }
 
+    /// This always will return Some in the Ok case, this is done to allow accept and open to have the same functionality
     async fn open_bidirectional(
         mut self,
-    ) -> Result<(QuicReceiveStream, QuicSendStream), ConnectionError> {
+    ) -> Result<Option<(QuicReceiveStream, QuicSendStream)>, TaskError> {
         let bidir_res = self.connection.open_bidirectional_stream().await;
 
         match bidir_res {
@@ -322,14 +315,13 @@ impl ConnectionHandleTask {
                 let quic_rec =
                     QuicReceiveStream::new(Handle::current(), rec_stream, self.parent_id);
 
-                return Ok((quic_rec, quic_send));
+                Ok(Some((quic_rec, quic_send)))
             }
-            Err(err) => {
-                return Err(err);
-            }
+            Err(err) => Err(err.into()),
         }
     }
 
+    /// This always will return Some in the Ok case, this is done to allow accept and open to have the same functionality
     async fn open_send(
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<QuicSendStream>>,
@@ -472,7 +464,7 @@ impl ConnectionTask {
                 }
 
                 if err.is_closed() {
-                    self.is_open.store(false, Ordering::Relaxed);
+                    self.is_open.set_closed();
                 }
 
                 return Err(err);
@@ -520,7 +512,7 @@ impl ConnectionTask {
                 }
 
                 if err.is_closed() {
-                    self.is_open.store(false, Ordering::Relaxed);
+                    self.is_open.set_closed();
                 }
 
                 return Err(err);
@@ -565,7 +557,7 @@ impl ConnectionTask {
                 }
 
                 if err.is_closed() {
-                    self.is_open.store(false, Ordering::Relaxed);
+                    self.is_open.set_closed();
                 }
 
                 return Err(err);

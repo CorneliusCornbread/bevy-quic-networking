@@ -7,7 +7,7 @@ use tokio::{runtime::Handle, sync::oneshot};
 
 use crate::common::{
     QuicParentId,
-    attempt::{QuicActionAttempt, TaskError},
+    attempt::{QuicActionAttempt, TaskError, TaskResult},
     stream::{receive::QuicReceiveStream, send::QuicSendStream},
 };
 
@@ -26,10 +26,10 @@ pub struct QuicReceiveStreamAttempt(QuicActionAttempt<Option<QuicReceiveStream>>
 impl QuicReceiveStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: oneshot::Receiver<Result<Option<QuicReceiveStream>, TaskError>>,
+        task: impl TaskResult<Option<QuicReceiveStream>> + 'static + Send + Sync,
         parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
+        Self(QuicActionAttempt::new(handle, task, parent_id))
     }
 }
 
@@ -40,10 +40,10 @@ pub struct QuicSendStreamAttempt(QuicActionAttempt<Option<QuicSendStream>>);
 impl QuicSendStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: oneshot::Receiver<Result<Option<QuicSendStream>, TaskError>>,
+        task: impl TaskResult<Option<QuicSendStream>> + 'static + Send + Sync,
         parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
+        Self(QuicActionAttempt::new(handle, task, parent_id))
     }
 }
 
@@ -56,12 +56,10 @@ pub struct QuicBidirectionalStreamAttempt(
 impl QuicBidirectionalStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: oneshot::Receiver<
-            Result<Option<(QuicReceiveStream, QuicSendStream)>, TaskError>,
-        >,
+        task: impl TaskResult<Option<(QuicReceiveStream, QuicSendStream)>> + 'static + Send + Sync,
         parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
+        Self(QuicActionAttempt::new(handle, task, parent_id))
     }
 }
 
@@ -72,10 +70,10 @@ pub struct QuicPeerStreamAttempt(QuicActionAttempt<Option<QuicPeerStream>>);
 impl QuicPeerStreamAttempt {
     pub fn new(
         handle: Handle,
-        conn_task: oneshot::Receiver<Result<Option<QuicPeerStream>, TaskError>>,
+        task: impl TaskResult<Option<QuicPeerStream>> + 'static + Send + Sync,
         parent_id: QuicParentId,
     ) -> Self {
-        Self(QuicActionAttempt::new(handle, conn_task, parent_id))
+        Self(QuicActionAttempt::new(handle, task, parent_id))
     }
 }
 

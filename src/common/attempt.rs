@@ -128,6 +128,12 @@ pub enum TaskError {
     TaskFailed(Arc<dyn Error + Send + Sync>),
 }
 
+impl From<ConnectionError> for TaskError {
+    fn from(value: ConnectionError) -> Self {
+        Self::ConnectionFailed(value)
+    }
+}
+
 #[derive(Component, Debug, Clone)]
 pub struct QuicActionErrorComponent {
     error: QuicActionError,
