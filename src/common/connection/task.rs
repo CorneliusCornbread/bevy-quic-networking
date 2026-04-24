@@ -21,7 +21,7 @@ use crate::common::{
     QuicParentId,
     attempt::TaskError,
     connection::{
-        ConnectionCommand, ConnectionResponse, OpenFlag, PendingStreams,
+        ConnectionCommand, ConnectionResponse, OpenFlag,
         disconnect::{ConnectionDisconnectReason, ConnectionErrorDisconnected},
     },
     stream::{QuicPeerStream, receive::QuicReceiveStream, send::QuicSendStream},
@@ -151,11 +151,7 @@ impl ConnectionTask {
                 .recv_many(&mut cmd_buf, CONNECTION_CMD_BUFF_SIZE_MAX)
                 .await;
 
-            let mut processed: usize = 0;
-
             for cmd in cmd_buf.drain(..count) {
-                processed += 1;
-
                 match cmd {
                     ConnectionCommand::AcceptReceive { respond_to } => {
                         self.accept_receive(respond_to).await;

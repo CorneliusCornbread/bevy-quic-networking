@@ -70,42 +70,6 @@ impl QuicConnectionAttempt {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct PendingStreams(Arc<AtomicUsize>);
-
-impl PendingStreams {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    pub(crate) fn increment(&self) {
-        self.0.fetch_add(1, Ordering::Release);
-    }
-
-    pub(crate) fn decrement(&self) {
-        #[cfg(debug_assertions)]
-        {
-            let prev = self.0.fetch_sub(1, Ordering::Release);
-            if prev == 0 {
-                bevy::log::error!("TaskCounter underflowed!");
-                // Correct the underflow
-                self.0.fetch_add(1, Ordering::Release);
-            }
-        }
-
-        #[cfg(not(debug_assertions))]
-        self.0.fetch_sub(1, Ordering::Release);
-    }
-
-    pub(crate) fn count(&self) -> usize {
-        self.0.load(Ordering::Acquire)
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.count() == 0
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct OpenFlag(Arc<AtomicBool>);
 
