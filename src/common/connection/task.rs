@@ -7,7 +7,7 @@ use s2n_quic::{
     Connection,
     connection::{Error as ConnectionError, Handle as ConnectionHandle},
 };
-use std::{error::Error, fmt, net::SocketAddr, sync::Arc};
+use std::{error::Error, fmt, net::SocketAddr, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::{
     runtime::Handle,
@@ -15,6 +15,7 @@ use tokio::{
         mpsc::{self, error::TrySendError},
         oneshot,
     },
+    time::timeout,
 };
 
 use crate::common::{
@@ -30,6 +31,8 @@ use crate::common::{
 
 const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
 const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
+
+const ACCEPT_TIMEOUT: Duration = Duration::from_millis(1);
 
 pub(in crate::common::connection) type ConnectionTaskState =
     QuicTaskState<ConnectionDisconnectReason>;
@@ -152,17 +155,18 @@ impl ConnectionTask {
                 .await;
 
             for cmd in cmd_buf.drain(..count) {
-                match cmd {
+                let cmd_res = match cmd {
                     ConnectionCommand::AcceptReceive { respond_to } => {
-                        self.accept_receive(respond_to).await;
+                        self.accept_receive(respond_to).await
                     }
                     ConnectionCommand::AcceptBidirectional { respond_to } => {
-                        self.accept_bidirectional(respond_to).await;
+                        self.accept_bidirectional(respond_to).await
                     }
-                    ConnectionCommand::Accept { respond_to } => {
-                        self.accept(respond_to).await;
-                    }
-                }
+                    ConnectionCommand::Accept { respond_to } => self.accept(respond_to).await,
+                };
+
+                // TODO: make handle result function
+                //self.handle_cmd_result(cmd_res);
             }
         }
 
@@ -176,9 +180,11 @@ impl ConnectionTask {
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
     ) -> Result<(), ConnectionError> {
-        // TODO: this will block until we get a stream
-        // we need a way to avoid blocking our async task
-        let accept_res = self.connection.accept_receive_stream().await;
+        let timeout = timeout(ACCEPT_TIMEOUT, self.connection.accept_receive_stream()).await;
+
+        let Ok(accept_res) = timeout else {
+            return Ok(());
+        };
 
         match accept_res {
             Ok(rec_opt) => {
@@ -221,7 +227,18 @@ impl ConnectionTask {
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
     ) -> Result<(), ConnectionError> {
-        let accept_res = self.connection.accept_bidirectional_stream().await;
+        // TODO: switch to ArcWake instead:
+        // https://rust-lang-nursery.github.io/futures-api-docs/0.3.0-alpha.13/futures/task/trait.ArcWake.html
+        // this can allow us to have flags when streams are pending and return immediately
+        let timeout = timeout(
+            ACCEPT_TIMEOUT,
+            self.connection.accept_bidirectional_stream(),
+        )
+        .await;
+
+        let Ok(accept_res) = timeout else {
+            return Ok(());
+        };
 
         match accept_res {
             Ok(rec_opt) => {
@@ -269,9 +286,13 @@ impl ConnectionTask {
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
     ) -> Result<(), ConnectionError> {
-        // TODO: this will block until we get a stream
-        // we need a way to avoid blocking our async task
-        let accept_res = self.connection.accept().await;
+        let timeout = timeout(ACCEPT_TIMEOUT, self.connection.accept()).await;
+
+        //self.connection.poll_accept(cx);
+
+        let Ok(accept_res) = timeout else {
+            return Ok(());
+        };
 
         match accept_res {
             Ok(rec_opt) => {
