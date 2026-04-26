@@ -9,7 +9,7 @@ use bevy::{
 use s2n_quic::{Connection, connection::Handle as ConnectionHandle};
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, Ordering},
 };
 use tokio::{
     runtime::Handle,
@@ -25,6 +25,8 @@ use crate::common::{
     attempt::{QuicActionAttempt, TaskError},
     connection::{
         disconnect::ConnectionDisconnectReason,
+        open_flag::OpenFlag,
+        stream_flag::StreamFlag,
         task::{ConnectionCommandError, ConnectionHandleTask, ConnectionTask, ConnectionTaskState},
     },
     stream::{
@@ -35,8 +37,10 @@ use crate::common::{
 
 pub mod disconnect;
 pub mod id;
+pub(super) mod open_flag;
 pub mod plugin;
 pub mod runtime;
+pub(super) mod stream_flag;
 pub mod task;
 
 /// Number of messages that can sit unhandled by the connection task
@@ -70,27 +74,6 @@ impl QuicConnectionAttempt {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct OpenFlag(Arc<AtomicBool>);
-
-impl OpenFlag {
-    pub(crate) fn new(value: bool) -> Self {
-        Self(Arc::new(AtomicBool::new(value)))
-    }
-
-    pub(crate) fn get(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn set_closed(&self) {
-        self.0.store(false, Ordering::Relaxed)
-    }
-
-    pub(crate) fn set_open(&self) {
-        self.0.store(true, Ordering::Relaxed)
-    }
-}
-
 #[derive(Debug, Component)]
 pub struct QuicConnection {
     runtime: Handle,
@@ -99,6 +82,8 @@ pub struct QuicConnection {
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
     is_open: OpenFlag,
     parent_id: QuicParentId,
+    /// Flag set by async wakers as soon as there's a new stream
+    pending_stream: StreamFlag,
 }
 
 impl QuicConnection {
@@ -110,6 +95,8 @@ impl QuicConnection {
         let res = connection.keep_alive(true);
         let (send, rec) = mpsc::channel(CONNECTION_CTRL_CHANNEL_SIZE);
 
+        let pending_stream = StreamFlag::new(false);
+
         if let Err(e) = res {
             warn!(
                 "Unable to mark new connection with keep alive, is the connection already closed? Reason: \"{}\"",
@@ -119,7 +106,13 @@ impl QuicConnection {
 
         let is_open = OpenFlag::new(true);
         let conn_handle = connection.handle();
-        let task = ConnectionTask::new(connection, rec, parent_id, is_open.clone());
+        let task = ConnectionTask::new(
+            connection,
+            rec,
+            parent_id,
+            is_open.clone(),
+            pending_stream.clone(),
+        );
 
         let handle = runtime.spawn(task.start());
 
@@ -130,6 +123,7 @@ impl QuicConnection {
             conn_command_channel: send,
             is_open,
             parent_id,
+            pending_stream,
         }
     }
 

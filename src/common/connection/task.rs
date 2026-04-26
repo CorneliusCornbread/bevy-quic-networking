@@ -22,8 +22,10 @@ use crate::common::{
     QuicParentId,
     attempt::TaskError,
     connection::{
-        ConnectionCommand, ConnectionResponse, OpenFlag,
+        ConnectionCommand, ConnectionResponse,
         disconnect::{ConnectionDisconnectReason, ConnectionErrorDisconnected},
+        open_flag::OpenFlag,
+        stream_flag::StreamFlag,
     },
     stream::{QuicPeerStream, receive::QuicReceiveStream, send::QuicSendStream},
     task_state::QuicTaskState,
@@ -115,6 +117,7 @@ pub(crate) struct ConnectionTask {
     cmd_receiver: mpsc::Receiver<ConnectionCommand>,
     disconnect_flag: Option<ConnectionDisconnectReason>,
     is_open: OpenFlag,
+    pending_stream: StreamFlag,
     parent_id: QuicParentId,
 }
 
@@ -124,12 +127,14 @@ impl ConnectionTask {
         cmd_receiver: mpsc::Receiver<ConnectionCommand>,
         parent_id: QuicParentId,
         is_open: OpenFlag,
+        pending_stream: StreamFlag,
     ) -> Self {
         Self {
             connection,
             cmd_receiver,
             disconnect_flag: None,
             is_open,
+            pending_stream,
             parent_id,
         }
     }
