@@ -238,13 +238,13 @@ impl QuicConnection {
     }
 
     /// Returns true if the connection is still open.
-    pub fn is_open(&mut self) -> bool {
+    pub fn is_open(&self) -> bool {
         !self.task_state.is_finished() && self.is_open.get()
     }
 
     /// Returns true of a new stream of any kind is pending.
     pub fn pending_new_stream(&self) -> bool {
-        self.pending_stream.get()
+        self.pending_stream.get() && self.is_open()
     }
 
     /// Gets the disconnect reason if the stream has closed.
