@@ -7,10 +7,6 @@ use bevy::{
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::{Connection, connection::Handle as ConnectionHandle};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 use tokio::{
     runtime::Handle,
     sync::{
@@ -31,7 +27,8 @@ use crate::common::{
     },
     stream::{
         QuicBidirectionalStreamAttempt, QuicPeerStream, QuicPeerStreamAttempt,
-        QuicReceiveStreamAttempt, receive::QuicReceiveStream, send::QuicSendStream,
+        QuicReceiveStreamAttempt, QuicSendStreamAttempt, receive::QuicReceiveStream,
+        send::QuicSendStream,
     },
 };
 
@@ -127,7 +124,16 @@ impl QuicConnection {
         }
     }
 
+    /// Accepts any incoming streams, this will always return an [QuicPeerStreamAttempt] even if
+    /// there are no pending streams.
+    ///
+    /// There's also a chance that an accept will successfully get a stream even if there aren't
+    /// any pending streams due to network timings.
+    ///
+    /// Returns an error if the async communication channel errors out due to being full.
     pub fn accept_stream(&mut self) -> Result<QuicPeerStreamAttempt, ConnectionCommandError> {
+        self.pending_stream.set_false();
+
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::Accept { respond_to: send };
@@ -142,9 +148,18 @@ impl QuicConnection {
         Ok(attempt)
     }
 
+    /// Accepts incoming receive streams, this will always return an [QuicReceiveStreamAttempt] even if
+    /// there are no pending streams.
+    ///
+    /// There's also a chance that an accept will successfully get a stream even if there aren't
+    /// any pending streams due to network timings.
+    ///
+    /// Returns an error if the async communication channel errors out due to being full.
     pub fn accept_receive_stream(
         &mut self,
     ) -> Result<QuicReceiveStreamAttempt, ConnectionCommandError> {
+        self.pending_stream.set_false();
+
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::AcceptReceive { respond_to: send };
@@ -159,9 +174,18 @@ impl QuicConnection {
         Ok(attempt)
     }
 
+    /// Accepts incoming bidirectional streams, this will always return an [QuicBidirectionalStreamAttempt] even if
+    /// there are no pending streams.
+    ///
+    /// There's also a chance that an accept will successfully get a stream even if there aren't
+    /// any pending streams due to network timings.
+    ///
+    /// Returns an error if the async communication channel errors out due to being full.
     pub fn accept_bidirectional_stream(
         &mut self,
     ) -> Result<QuicBidirectionalStreamAttempt, ConnectionCommandError> {
+        self.pending_stream.set_false();
+
         let (send, rec) = oneshot::channel();
 
         let cmd = ConnectionCommand::AcceptBidirectional { respond_to: send };
@@ -177,6 +201,7 @@ impl QuicConnection {
         Ok(attempt)
     }
 
+    /// Attempts to open a new bidirectional stream to be accepted by the remote peer.
     pub fn open_bidrectional_stream(
         &mut self,
     ) -> Result<QuicBidirectionalStreamAttempt, ConnectionCommandError> {
@@ -195,9 +220,31 @@ impl QuicConnection {
         ))
     }
 
+    /// Attempts to open a new send stream to be accepted by the remote peer.
+    pub fn open_send_stream(&mut self) -> Result<QuicSendStreamAttempt, ConnectionCommandError> {
+        let task = ConnectionHandleTask::new(
+            self.conn_handle.clone(),
+            self.is_open.clone(),
+            self.parent_id,
+        );
+
+        let join = self.runtime.spawn(task.open_send());
+
+        Ok(QuicSendStreamAttempt::new(
+            self.runtime.clone(),
+            join,
+            self.parent_id,
+        ))
+    }
+
     /// Returns true if the connection is still open.
     pub fn is_open(&mut self) -> bool {
         !self.task_state.is_finished() && self.is_open.get()
+    }
+
+    /// Returns true of a new stream of any kind is pending.
+    pub fn pending_new_stream(&self) -> bool {
+        self.pending_stream.get()
     }
 
     /// Gets the disconnect reason if the stream has closed.

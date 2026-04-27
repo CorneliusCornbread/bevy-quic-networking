@@ -39,6 +39,8 @@ const ACCEPT_TIMEOUT: Duration = Duration::from_millis(1);
 pub(in crate::common::connection) type ConnectionTaskState =
     QuicTaskState<ConnectionDisconnectReason>;
 
+// TODO: This could be made public and used elsewhere as a async way to open new connections
+// or get information about a connection
 #[derive(Debug)]
 pub(crate) struct ConnectionHandleTask {
     connection: ConnectionHandle,
@@ -60,7 +62,7 @@ impl fmt::Display for ConnectionHandleTask {
 }
 
 impl ConnectionHandleTask {
-    pub(crate) fn new(
+    pub(super) fn new(
         connection: ConnectionHandle,
         is_open: OpenFlag,
         parent_id: QuicParentId,
@@ -98,7 +100,7 @@ impl ConnectionHandleTask {
 
     /// This always will return Some in the Ok case, this is done to allow accept and open to have the same functionality
     #[tracing::instrument]
-    pub(crate) async fn open_send(&mut self) -> Result<Option<QuicSendStream>, TaskError> {
+    pub(crate) async fn open_send(mut self) -> Result<Option<QuicSendStream>, TaskError> {
         let send_res = self.connection.open_send_stream().await;
 
         match send_res {
