@@ -3,27 +3,35 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-#[derive(Clone, Debug)]
-pub(super) struct StreamFlag(Arc<AtomicBool>);
+use futures::task::ArcWake;
+
+#[derive(Debug)]
+pub(crate) struct StreamFlag(AtomicBool);
 
 impl StreamFlag {
-    pub(super) fn new(value: bool) -> Self {
-        Self(Arc::new(AtomicBool::new(value)))
+    pub(crate) fn new(value: bool) -> Self {
+        Self(AtomicBool::new(value))
     }
 
-    pub(super) fn get(&self) -> bool {
+    pub(crate) fn get(&self) -> bool {
         self.0.load(Ordering::Acquire)
     }
 
-    pub(super) fn set_true(&self) {
-        self.0.store(false, Ordering::Release)
-    }
-
-    pub(super) fn set_false(&self) {
+    pub(crate) fn set_true(&self) {
         self.0.store(true, Ordering::Release)
     }
 
-    pub(super) fn swap(&self, value: bool) -> bool {
+    pub(crate) fn set_false(&self) {
+        self.0.store(false, Ordering::Release)
+    }
+
+    pub(crate) fn swap(&self, value: bool) -> bool {
         self.0.swap(value, Ordering::AcqRel)
+    }
+}
+
+impl ArcWake for StreamFlag {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.set_true();
     }
 }

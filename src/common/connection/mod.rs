@@ -7,6 +7,7 @@ use bevy::{
     prelude::{Deref, DerefMut},
 };
 use s2n_quic::{Connection, connection::Handle as ConnectionHandle};
+use std::sync::Arc;
 use tokio::{
     runtime::Handle,
     sync::{
@@ -80,7 +81,7 @@ pub struct QuicConnection {
     is_open: OpenFlag,
     parent_id: QuicParentId,
     /// Flag set by async wakers as soon as there's a new stream
-    pending_stream: StreamFlag,
+    pending_stream: Arc<StreamFlag>,
 }
 
 impl QuicConnection {
@@ -92,7 +93,7 @@ impl QuicConnection {
         let res = connection.keep_alive(true);
         let (send, rec) = mpsc::channel(CONNECTION_CTRL_CHANNEL_SIZE);
 
-        let pending_stream = StreamFlag::new(false);
+        let pending_stream = Arc::new(StreamFlag::new(false));
 
         if let Err(e) = res {
             warn!(

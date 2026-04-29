@@ -4,22 +4,22 @@ use std::sync::{
 };
 
 #[derive(Clone, Debug)]
-pub(super) struct OpenFlag(Arc<AtomicBool>);
+pub(crate) struct OpenFlag(Arc<AtomicBool>);
 
 impl OpenFlag {
-    pub(super) fn new(value: bool) -> Self {
+    pub(crate) fn new(value: bool) -> Self {
         Self(Arc::new(AtomicBool::new(value)))
     }
 
-    pub(super) fn get(&self) -> bool {
+    pub(crate) fn get(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
 
-    pub(super) fn set_closed(&self) {
+    pub(crate) fn set_closed(&self) {
         self.0.store(false, Ordering::Relaxed)
     }
 
-    pub(super) fn set_open(&self) {
+    pub(crate) fn set_open(&self) {
         self.0.store(true, Ordering::Relaxed)
     }
 }

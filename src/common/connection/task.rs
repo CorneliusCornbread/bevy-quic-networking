@@ -3,6 +3,7 @@ use bevy::log::{
     tracing::{self},
     warn,
 };
+use futures::task::ArcWake;
 use s2n_quic::{
     Connection,
     connection::{Error as ConnectionError, Handle as ConnectionHandle},
@@ -119,7 +120,7 @@ pub(crate) struct ConnectionTask {
     cmd_receiver: mpsc::Receiver<ConnectionCommand>,
     disconnect_flag: Option<ConnectionDisconnectReason>,
     is_open: OpenFlag,
-    pending_stream: StreamFlag,
+    pending_stream: Arc<StreamFlag>,
     parent_id: QuicParentId,
 }
 
@@ -129,7 +130,7 @@ impl ConnectionTask {
         cmd_receiver: mpsc::Receiver<ConnectionCommand>,
         parent_id: QuicParentId,
         is_open: OpenFlag,
-        pending_stream: StreamFlag,
+        pending_stream: Arc<StreamFlag>,
     ) -> Self {
         Self {
             connection,
@@ -294,8 +295,6 @@ impl ConnectionTask {
         respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
     ) -> Result<(), ConnectionError> {
         let timeout = timeout(ACCEPT_TIMEOUT, self.connection.accept()).await;
-
-        //self.connection.poll_accept(cx);
 
         let Ok(accept_res) = timeout else {
             return Ok(());
