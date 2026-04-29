@@ -6,7 +6,7 @@ use bevy::{
     },
     prelude::{Deref, DerefMut},
 };
-use s2n_quic::{Connection, connection::Handle as ConnectionHandle};
+use s2n_quic::{Connection, connection::Handle as ConnectionHandle, stream::PeerStream};
 use std::sync::Arc;
 use tokio::{
     runtime::Handle,
@@ -24,7 +24,10 @@ use crate::common::{
         disconnect::ConnectionDisconnectReason,
         open_flag::OpenFlag,
         stream_flag::StreamFlag,
-        task::{ConnectionCommandError, ConnectionHandleTask, ConnectionTask, ConnectionTaskState},
+        task::{
+            ConnectionCommandError, ConnectionHandleTask, ConnectionTask,
+            ConnectionTaskState,
+        },
     },
     stream::{
         QuicBidirectionalStreamAttempt, QuicPeerStream, QuicPeerStreamAttempt,
@@ -51,13 +54,24 @@ pub(crate) enum ConnectionCommand {
         respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
     },
     AcceptBidirectional {
-        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
+        respond_to:
+            oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
     },
     Accept {
         respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
     },
 }
 
+/// This is a structure which represents an in progress connection.
+/// Any pending connections this attempt may hold will be closed
+/// if this structure is dropped without being handled.
+///
+/// Attempts are all handled internally. Put them on an entity
+/// and they will be replaced with a full [QuicConnection]
+/// on the same entity.
+///
+/// In the event of a failure, with the `connection-errors` feature
+/// flag enabled, a error component will be added on the entity.
 #[derive(Deref, DerefMut, Component)]
 #[component(storage = "SparseSet")]
 pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
@@ -89,7 +103,11 @@ impl QuicConnection {
         name = "new_quic_connection"
         skip(runtime),
     )]
-    pub fn new(runtime: Handle, mut connection: Connection, parent_id: QuicParentId) -> Self {
+    pub fn new(
+        runtime: Handle,
+        mut connection: Connection,
+        parent_id: QuicParentId,
+    ) -> Self {
         let res = connection.keep_alive(true);
         let (send, rec) = mpsc::channel(CONNECTION_CTRL_CHANNEL_SIZE);
 
@@ -132,7 +150,9 @@ impl QuicConnection {
     /// any pending streams due to network timings.
     ///
     /// Returns an error if the async communication channel errors out due to being full.
-    pub fn accept_stream(&mut self) -> Result<QuicPeerStreamAttempt, ConnectionCommandError> {
+    pub fn accept_stream(
+        &mut self,
+    ) -> Result<QuicPeerStreamAttempt, ConnectionCommandError> {
         self.pending_stream.set_false();
 
         let (send, rec) = oneshot::channel();
@@ -144,7 +164,8 @@ impl QuicConnection {
             return Err(err.into());
         }
 
-        let attempt = QuicPeerStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+        let attempt =
+            QuicPeerStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
 
         Ok(attempt)
     }
@@ -170,7 +191,8 @@ impl QuicConnection {
             return Err(err.into());
         }
 
-        let attempt = QuicReceiveStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+        let attempt =
+            QuicReceiveStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
 
         Ok(attempt)
     }
@@ -196,8 +218,11 @@ impl QuicConnection {
             return Err(err.into());
         }
 
-        let attempt =
-            QuicBidirectionalStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+        let attempt = QuicBidirectionalStreamAttempt::new(
+            self.runtime.clone(),
+            rec,
+            self.parent_id,
+        );
 
         Ok(attempt)
     }
@@ -222,7 +247,9 @@ impl QuicConnection {
     }
 
     /// Attempts to open a new send stream to be accepted by the remote peer.
-    pub fn open_send_stream(&mut self) -> Result<QuicSendStreamAttempt, ConnectionCommandError> {
+    pub fn open_send_stream(
+        &mut self,
+    ) -> Result<QuicSendStreamAttempt, ConnectionCommandError> {
         let task = ConnectionHandleTask::new(
             self.conn_handle.clone(),
             self.is_open.clone(),
@@ -243,8 +270,21 @@ impl QuicConnection {
         !self.task_state.is_finished() && self.is_open.get()
     }
 
-    /// Returns true of a new stream of any kind is pending.
-    pub fn pending_new_stream(&self) -> bool {
+    /// Returns true if calling [accept_stream][Self::accept_stream()] will return something different.
+    /// This doesn't necessarily mean there's a pending connection, just that
+    /// calling accept() will return something different.
+    ///
+    /// This flag will always return true, if [accept_stream][Self::accept_stream()]
+    /// hasn't been called yet. This is because the waker isn't registered until accept
+    /// is called.
+    ///
+    /// This also doesn't necessarily mean the [accept_bidirectional_stream][Self::accept_bidirectional_stream()]
+    /// and [accept_receive_stream][Self::accept_receive_stream()] will both return something new.
+    ///
+    /// This flag is set by the general [s2n_quic::Connection::poll_accept()] poll,
+    /// so the specific variants *could* be a receive stream, bidirectional stream, or
+    /// it could be an error.
+    pub fn should_poll_accept(&self) -> bool {
         self.pending_stream.get() && self.is_open()
     }
 

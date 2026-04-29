@@ -3,12 +3,20 @@ use bevy::log::{
     tracing::{self},
     warn,
 };
-use futures::task::ArcWake;
+use futures::task::waker_ref;
 use s2n_quic::{
     Connection,
     connection::{Error as ConnectionError, Handle as ConnectionHandle},
+    stream::PeerStream,
 };
-use std::{error::Error, fmt, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    error::Error,
+    fmt,
+    net::SocketAddr,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::{
     runtime::Handle,
@@ -35,6 +43,13 @@ use crate::common::{
 const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
 const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
 
+/// Timeout used by receive and bidrectional accept variants.
+/// If no stream is accepted by this timeout we will assume there are
+/// no pending streams and return None
+///
+/// Regular accept uses poll behaviour so it is not subject to timeouts.
+/// This also means the accept() variant is less tolerant to network
+/// timings.
 const ACCEPT_TIMEOUT: Duration = Duration::from_millis(1);
 
 pub(in crate::common::connection) type ConnectionTaskState =
@@ -78,7 +93,8 @@ impl ConnectionHandleTask {
         }
     }
 
-    /// This always will return Some in the Ok case, this is done to allow accept and open to have the same functionality
+    /// This always will return Some in the Ok case,
+    /// this is done to allow accept and open to have the same functionality
     #[tracing::instrument]
     pub(crate) async fn open_bidirectional(
         mut self,
@@ -89,7 +105,8 @@ impl ConnectionHandleTask {
             Ok(stream) => {
                 let (rec_stream, send_stream) = stream.split();
 
-                let quic_send = QuicSendStream::new(Handle::current(), send_stream, self.parent_id);
+                let quic_send =
+                    QuicSendStream::new(Handle::current(), send_stream, self.parent_id);
                 let quic_rec =
                     QuicReceiveStream::new(Handle::current(), rec_stream, self.parent_id);
 
@@ -99,14 +116,16 @@ impl ConnectionHandleTask {
         }
     }
 
-    /// This always will return Some in the Ok case, this is done to allow accept and open to have the same functionality
+    /// This always will return Some in the Ok case,
+    /// this is done to allow accept and open to have the same functionality
     #[tracing::instrument]
     pub(crate) async fn open_send(mut self) -> Result<Option<QuicSendStream>, TaskError> {
         let send_res = self.connection.open_send_stream().await;
 
         match send_res {
             Ok(stream) => {
-                let quic_send = QuicSendStream::new(Handle::current(), stream, self.parent_id);
+                let quic_send =
+                    QuicSendStream::new(Handle::current(), stream, self.parent_id);
                 Ok(Some(quic_send))
             }
             Err(err) => Err(err.into()),
@@ -122,6 +141,7 @@ pub(crate) struct ConnectionTask {
     is_open: OpenFlag,
     pending_stream: Arc<StreamFlag>,
     parent_id: QuicParentId,
+    buffered_stream: Option<PeerStream>,
 }
 
 impl ConnectionTask {
@@ -139,6 +159,7 @@ impl ConnectionTask {
             is_open,
             pending_stream,
             parent_id,
+            buffered_stream: None,
         }
     }
 
@@ -154,6 +175,18 @@ impl ConnectionTask {
     pub(crate) async fn start(mut self) -> ConnectionDisconnectReason {
         info!("New connection opened");
 
+        // We need to run accept() once to make sure the poll is registered
+        {
+            let waker = waker_ref(&self.pending_stream);
+            let mut cx = Context::from_waker(&waker);
+            let poll = self.connection.poll_accept(&mut cx);
+
+            // If we actually accept a stream during this buffer it to be handled later
+            if let Poll::Ready(Ok(Some(stream))) = poll {
+                self.buffered_stream = Some(stream);
+            }
+        }
+
         let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
 
         while self.disconnect_flag.is_none() {
@@ -165,12 +198,81 @@ impl ConnectionTask {
             for cmd in cmd_buf.drain(..count) {
                 let cmd_res = match cmd {
                     ConnectionCommand::AcceptReceive { respond_to } => {
-                        self.accept_receive(respond_to).await
+                        if let Some(PeerStream::Receive(stream)) =
+                            self.buffered_stream.take()
+                        {
+                            let rec_stream = QuicReceiveStream::new(
+                                Handle::current(),
+                                stream,
+                                self.parent_id,
+                            );
+
+                            let send_res = respond_to.send(Ok(Some(rec_stream)));
+
+                            if send_res.is_err() {
+                                warn!(
+                                    "Attempted to send buffered stream resulting in error, connection will be closed."
+                                );
+                            }
+
+                            Ok(())
+                        } else {
+                            self.accept_receive(respond_to).await
+                        }
                     }
                     ConnectionCommand::AcceptBidirectional { respond_to } => {
-                        self.accept_bidirectional(respond_to).await
+                        if let Some(PeerStream::Bidirectional(stream)) =
+                            self.buffered_stream.take()
+                        {
+                            let (rec, send) = stream.split();
+
+                            let rec_stream = QuicReceiveStream::new(
+                                Handle::current(),
+                                rec,
+                                self.parent_id,
+                            );
+
+                            let send_stream = QuicSendStream::new(
+                                Handle::current(),
+                                send,
+                                self.parent_id,
+                            );
+
+                            let send_res =
+                                respond_to.send(Ok(Some((rec_stream, send_stream))));
+
+                            if send_res.is_err() {
+                                warn!(
+                                    "Attempted to send buffered stream resulting in error, connection will be closed."
+                                );
+                            }
+
+                            Ok(())
+                        } else {
+                            self.accept_bidirectional(respond_to).await
+                        }
                     }
-                    ConnectionCommand::Accept { respond_to } => self.accept(respond_to).await,
+                    ConnectionCommand::Accept { respond_to } => {
+                        if let Some(stream) = self.buffered_stream.take() {
+                            let peer_stream = QuicPeerStream::new(
+                                Handle::current(),
+                                stream,
+                                self.parent_id,
+                            );
+
+                            let send_res = respond_to.send(Ok(Some(peer_stream)));
+
+                            if send_res.is_err() {
+                                warn!(
+                                    "Attempted to send buffered stream resulting in error, connection will be closed."
+                                );
+                            }
+
+                            Ok(())
+                        } else {
+                            self.accept(respond_to).await
+                        }
+                    }
                 };
 
                 // TODO: make handle result function
@@ -188,7 +290,8 @@ impl ConnectionTask {
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
     ) -> Result<(), ConnectionError> {
-        let timeout = timeout(ACCEPT_TIMEOUT, self.connection.accept_receive_stream()).await;
+        let timeout =
+            timeout(ACCEPT_TIMEOUT, self.connection.accept_receive_stream()).await;
 
         let Ok(accept_res) = timeout else {
             return Ok(());
@@ -233,11 +336,10 @@ impl ConnectionTask {
 
     pub(crate) async fn accept_bidirectional(
         &mut self,
-        respond_to: oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
+        respond_to: oneshot::Sender<
+            ConnectionResponse<(QuicReceiveStream, QuicSendStream)>,
+        >,
     ) -> Result<(), ConnectionError> {
-        // TODO: switch to ArcWake instead:
-        // https://rust-lang-nursery.github.io/futures-api-docs/0.3.0-alpha.13/futures/task/trait.ArcWake.html
-        // this can allow us to have flags when streams are pending and return immediately
         let timeout = timeout(
             ACCEPT_TIMEOUT,
             self.connection.accept_bidirectional_stream(),
@@ -253,8 +355,10 @@ impl ConnectionTask {
                 let mapped = rec_opt.map(|bidir_stream| {
                     let (rec, send) = bidir_stream.split();
 
-                    let quic_rec = QuicReceiveStream::new(Handle::current(), rec, self.parent_id);
-                    let quic_send = QuicSendStream::new(Handle::current(), send, self.parent_id);
+                    let quic_rec =
+                        QuicReceiveStream::new(Handle::current(), rec, self.parent_id);
+                    let quic_send =
+                        QuicSendStream::new(Handle::current(), send, self.parent_id);
 
                     (quic_rec, quic_send)
                 });
@@ -294,9 +398,15 @@ impl ConnectionTask {
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
     ) -> Result<(), ConnectionError> {
-        let timeout = timeout(ACCEPT_TIMEOUT, self.connection.accept()).await;
+        let poll;
 
-        let Ok(accept_res) = timeout else {
+        {
+            let waker = waker_ref(&self.pending_stream);
+            let mut cx = Context::from_waker(&waker);
+            poll = self.connection.poll_accept(&mut cx);
+        }
+
+        let Poll::Ready(accept_res) = poll else {
             return Ok(());
         };
 
