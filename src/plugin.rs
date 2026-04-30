@@ -1,6 +1,6 @@
 use bevy::app::Plugin;
 
-use crate::common::connection::runtime::TokioRuntime;
+use crate::common::runtime::TokioRuntime;
 
 pub const DEFAULT_TICK_RATE: u16 = 64;
 

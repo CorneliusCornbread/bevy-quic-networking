@@ -4,12 +4,13 @@ use bevy::{
         entity::Entity,
         system::{Commands, Query, Res},
     },
-    log::{error, info, info_span, tracing},
+    log::{error, info, tracing},
 };
 
 use crate::common::{
     attempt::QuicActionError,
-    connection::{QuicConnection, QuicConnectionAttempt, runtime::TokioRuntime},
+    connection::{QuicConnection, QuicConnectionAttempt},
+    runtime::TokioRuntime,
 };
 
 #[derive(Debug)]
@@ -41,7 +42,9 @@ fn handle_connection_attempts(
                     continue;
                 } // TODO: Setup a timeout
                 QuicActionError::Consumed => {
-                    info!("Already consumed connection attempt hasn't been cleaned up: {entity}");
+                    info!(
+                        "Already consumed connection attempt hasn't been cleaned up: {entity}"
+                    );
                 }
                 QuicActionError::ConnectionFailed(error) => {
                     error!("Error handling connection attempt: {:?}", error)
@@ -55,7 +58,10 @@ fn handle_connection_attempts(
 
             #[cfg(feature = "connection-errors")]
             {
-                use {crate::common::attempt::QuicActionErrorComponent, std::time::SystemTime};
+                use {
+                    crate::common::attempt::QuicActionErrorComponent,
+                    std::time::SystemTime,
+                };
 
                 let err_comp = QuicActionErrorComponent::new(e, SystemTime::now());
                 let err_bundle = (err_comp, *parent_id);

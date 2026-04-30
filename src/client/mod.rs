@@ -1,19 +1,16 @@
-use std::sync::Arc;
-
 use bevy::ecs::component::Component;
 use s2n_quic::{
     Client, Connection,
     client::{Connect, ConnectionAttempt},
 };
 use s2n_quic_tls::{certificate::IntoCertificate, error::Error as TlsError};
-use tokio::{runtime::Handle, sync::Mutex};
+use tokio::runtime::Handle;
 
 use crate::{
     client::marker::QuicClientMarker,
     common::{
-        QuicParentId, QuicParentType,
-        attempt::TaskError,
-        connection::{QuicConnectionAttempt, runtime::TokioRuntime},
+        QuicParentId, QuicParentType, attempt::TaskError,
+        connection::QuicConnectionAttempt, runtime::TokioRuntime,
     },
 };
 
@@ -58,7 +55,8 @@ impl QuicClient {
         self.id
     }
 
-    /// Opens a new connection to the given `connect` target. Returns an attempt and an ID assigned to the connection.
+    /// Opens a new connection to the given `connect` target.
+    /// Returns an attempt and an ID assigned to the connection.
     pub fn open_connection(
         &mut self,
         connect: Connect,

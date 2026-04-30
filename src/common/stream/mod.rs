@@ -17,8 +17,18 @@ pub mod plugin;
 pub mod receive;
 pub mod send;
 pub mod session;
-pub mod task_state;
+pub(crate) mod task_state;
 
+/// This is a structure which represents an in progress receive stream.
+/// Any pending streams this attempt may hold will be closed
+/// if this structure is dropped without being handled.
+///
+/// Attempts are all handled internally. Put them on an entity
+/// and they will be replaced with a full [QuicReceiveStream].
+///
+/// In the event of a failure, with the `stream-errors` feature
+/// flag enabled, a [QuicActionErrorComponent][crate::common::attempt::QuicActionErrorComponent]
+/// will be added on the entity.
 #[derive(Deref, DerefMut, Component)]
 #[component(storage = "SparseSet")]
 pub struct QuicReceiveStreamAttempt(QuicActionAttempt<Option<QuicReceiveStream>>);
@@ -47,6 +57,17 @@ impl QuicSendStreamAttempt {
     }
 }
 
+/// This is a structure which represents an in progress bidirectional stream.
+/// Any pending streams this attempt may hold will be closed
+/// if this structure is dropped without being handled.
+///
+/// Attempts are all handled internally. Put them on an entity
+/// and they will be replaced with a [QuicSendStream] and a
+/// [QuicReceiveStream].
+///
+/// In the event of a failure, with the `stream-errors` feature
+/// flag enabled, a [QuicActionErrorComponent][crate::common::attempt::QuicActionErrorComponent]
+/// will be added on the entity.
 #[derive(Deref, DerefMut, Component)]
 #[component(storage = "SparseSet")]
 pub struct QuicBidirectionalStreamAttempt(
@@ -56,13 +77,27 @@ pub struct QuicBidirectionalStreamAttempt(
 impl QuicBidirectionalStreamAttempt {
     pub fn new(
         handle: Handle,
-        task: impl TaskResult<Option<(QuicReceiveStream, QuicSendStream)>> + 'static + Send + Sync,
+        task: impl TaskResult<Option<(QuicReceiveStream, QuicSendStream)>>
+        + 'static
+        + Send
+        + Sync,
         parent_id: QuicParentId,
     ) -> Self {
         Self(QuicActionAttempt::new(handle, task, parent_id))
     }
 }
 
+/// This is a structure which represents an in progress peer stream.
+/// Any pending streams this attempt may hold will be closed
+/// if this structure is dropped without being handled.
+///
+/// Attempts are all handled internally. Put them on an entity
+/// and they will be replaced with a either a [QuicSendStream],
+/// [QuicReceiveStream] or both in the case of a bidirectional stream.
+///
+/// In the event of a failure, with the `stream-errors` feature
+/// flag enabled, a [QuicActionErrorComponent][crate::common::attempt::QuicActionErrorComponent]
+/// will be added on the entity.
 #[derive(Component, Deref, DerefMut)]
 #[component(storage = "SparseSet")]
 pub struct QuicPeerStreamAttempt(QuicActionAttempt<Option<QuicPeerStream>>);
@@ -83,7 +118,11 @@ pub enum QuicPeerStream {
 }
 
 impl QuicPeerStream {
-    pub fn new(runtime: Handle, peer_stream: PeerStream, parent_id: QuicParentId) -> Self {
+    pub fn new(
+        runtime: Handle,
+        peer_stream: PeerStream,
+        parent_id: QuicParentId,
+    ) -> Self {
         match peer_stream {
             PeerStream::Bidirectional(bidirectional_stream) => {
                 let (rec, send) = bidirectional_stream.split();

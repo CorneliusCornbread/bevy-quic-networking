@@ -7,8 +7,7 @@ use tokio::{runtime::Handle, task::JoinError};
 
 use crate::{
     common::{
-        QuicParentId, QuicParentType,
-        connection::{QuicConnection, runtime::TokioRuntime},
+        QuicParentId, QuicParentType, connection::QuicConnection, runtime::TokioRuntime,
     },
     server::marker::QuicServerMarker,
 };

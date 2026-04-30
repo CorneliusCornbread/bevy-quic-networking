@@ -14,7 +14,8 @@ use crate::{
 
 pub mod attempt;
 pub mod connection;
-pub mod id;
+pub(crate) mod id;
+pub mod runtime;
 pub mod status_code;
 pub mod stream;
 pub(crate) mod task_state;

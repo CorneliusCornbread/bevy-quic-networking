@@ -26,7 +26,8 @@ use bevy_quic_networking::{
     QuicDefaultPlugins,
     client::{QuicClient, marker::QuicClientMarker},
     common::{
-        connection::{QuicConnection, runtime::TokioRuntime},
+        connection::QuicConnection,
+        runtime::TokioRuntime,
         stream::{receive::QuicReceiveStream, send::QuicSendStream},
     },
     server::{ConnectionPoll, QuicServer, marker::QuicServerMarker},
@@ -106,7 +107,8 @@ fn setup(mut commands: Commands, runtime: Res<TokioRuntime>) {
     commands.spawn(server_comp);
 
     // Spawn a new client with our cert
-    let mut client_comp = QuicClient::new_with_tls(&runtime, cert_path).expect("Invalid cert");
+    let mut client_comp =
+        QuicClient::new_with_tls(&runtime, cert_path).expect("Invalid cert");
     let connect = Connect::new(ip).with_server_name("localhost");
     let conn_bundle = client_comp.open_connection(connect);
 
@@ -202,7 +204,10 @@ fn server_accept_bidirectional(
 // Keeps track of the number of messages sent and received
 fn add_debug(
     mut commands: Commands,
-    query: Query<(Entity, &QuicReceiveStream), (Without<DebugCount>, With<QuicServerMarker>)>,
+    query: Query<
+        (Entity, &QuicReceiveStream),
+        (Without<DebugCount>, With<QuicServerMarker>),
+    >,
 ) {
     for (entity, _stream) in &query {
         commands.entity(entity).insert(DebugCount(0));

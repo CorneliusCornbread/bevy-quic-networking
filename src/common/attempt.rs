@@ -1,7 +1,6 @@
-use std::{error::Error, sync::Arc, time::SystemTime};
-
 use bevy::ecs::component::Component;
 use s2n_quic::connection::Error as ConnectionError;
+use std::{error::Error, sync::Arc, time::SystemTime};
 use thiserror::Error as ThisError;
 use tokio::{
     runtime::Handle,
@@ -11,13 +10,15 @@ use tokio::{
 
 use crate::common::QuicParentId;
 
+/// This is a the trait which allows us to implement
+/// async attempt behaviour on any provider (e.g.)
+/// a [oneshot::Receiver] or [JoinHandle] have default
+/// implementations.
+///
+/// See [QuicActionAttempt] for more details.
 pub trait TaskResult<T> {
     fn resolve_result(&mut self, handle: &Handle) -> Option<Result<T, TaskError>>;
 }
-
-#[derive(ThisError, Debug)]
-#[error("The send channel was closed without sending a value.")]
-pub struct ChannelClosed;
 
 impl<T> TaskResult<T> for oneshot::Receiver<Result<T, TaskError>> {
     fn resolve_result(&mut self, _handle: &Handle) -> Option<Result<T, TaskError>> {
@@ -50,6 +51,9 @@ impl<T> TaskResult<T> for JoinHandle<Result<T, TaskError>> {
     }
 }
 
+/// This is the structure which represents the async task
+/// being attempted and waited upon via sync polling with
+/// [attempt_result][QuicActionAttempt::attempt_result()]
 pub struct QuicActionAttempt<T> {
     runtime: Handle,
     task_res: Box<dyn TaskResult<T> + Send + Sync>,
@@ -72,6 +76,7 @@ impl<T> QuicActionAttempt<T> {
         }
     }
 
+    /// Attempt to get the result
     pub fn attempt_result(&mut self) -> Result<T, QuicActionError> {
         if let Some(ret) = &self.returned_value {
             return Err(ret.clone());
@@ -106,6 +111,8 @@ impl<T> QuicActionAttempt<T> {
     }
 }
 
+/// An enum representing all the ways a [QuicActionAttempt] can fail.
+/// See [QuicActionErrorComponent] for more details.
 #[derive(Clone, Debug, ThisError)]
 #[error("Quic action attempt failed to get a result")]
 pub enum QuicActionError {
@@ -119,8 +126,10 @@ pub enum QuicActionError {
     Crashed(Arc<dyn std::error::Error + Send + Sync>),
 }
 
+/// An enum representing all the ways a [TaskResult] can fail.
 #[derive(Clone, Debug, ThisError)]
 #[error("Quic task failed")]
+#[non_exhaustive]
 pub enum TaskError {
     #[error("ConnectionFailed: {0}")]
     ConnectionFailed(ConnectionError),
@@ -134,6 +143,15 @@ impl From<ConnectionError> for TaskError {
     }
 }
 
+/// This is a Bevy component which is added to an entity
+/// in the event a [QuicActionAttempt] fails.
+///
+/// These will only be added to entities when either the
+/// `connection-errors` or `stream-errors` feature flags are enabled for
+/// [QuicConnectionAttempt][crate::common::connection::QuicConnectionAttempt]
+/// related errors or
+/// [stream attempts][crate::common::stream]
+/// respectively.
 #[derive(Component, Debug, Clone)]
 pub struct QuicActionErrorComponent {
     error: QuicActionError,
@@ -149,6 +167,7 @@ impl QuicActionErrorComponent {
         &self.error
     }
 
+    /// The [SystemTime] at which this error was received by the sync (Bevy) side.
     pub fn timestamp(&self) -> &SystemTime {
         &self.timestamp
     }

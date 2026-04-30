@@ -40,7 +40,6 @@ pub mod disconnect;
 pub mod id;
 pub(super) mod open_flag;
 pub mod plugin;
-pub mod runtime;
 pub(super) mod stream_flag;
 pub mod task;
 
@@ -71,7 +70,8 @@ pub(crate) enum ConnectionCommand {
 /// on the same entity.
 ///
 /// In the event of a failure, with the `connection-errors` feature
-/// flag enabled, a error component will be added on the entity.
+/// flag enabled, a [QuicActionErrorComponent][crate::common::attempt::QuicActionErrorComponent]
+/// will be added on the entity.
 #[derive(Deref, DerefMut, Component)]
 #[component(storage = "SparseSet")]
 pub struct QuicConnectionAttempt(QuicActionAttempt<Connection>);
@@ -86,6 +86,8 @@ impl QuicConnectionAttempt {
     }
 }
 
+/// The component analogue to [Connection] in s2n-quic.
+/// This component manages the async behaviour of our Quic connection.
 #[derive(Debug, Component)]
 pub struct QuicConnection {
     runtime: Handle,
