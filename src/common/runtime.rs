@@ -2,7 +2,7 @@ use bevy::{
     ecs::resource::Resource,
     prelude::{Deref, DerefMut},
 };
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct TokioRuntime(pub(crate) Runtime);
@@ -15,5 +15,11 @@ impl Default for TokioRuntime {
                 .build()
                 .expect("Unable to create async runtime."),
         )
+    }
+}
+
+impl TokioRuntime {
+    pub fn handle(&self) -> &Handle {
+        self.0.handle()
     }
 }

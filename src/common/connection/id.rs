@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::common::{QuicParentId, QuicParentType};
+use crate::common::QuicParentId;
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct ConnectionId {
@@ -9,11 +9,16 @@ pub struct ConnectionId {
 }
 
 impl ConnectionId {
-    pub fn new(id: u64, parent_id: u64, parent_type: QuicParentType) -> Self {
-        Self {
-            parent_id: QuicParentId::new(parent_id, parent_type),
-            id,
-        }
+    pub fn new(id: u64, parent_id: QuicParentId) -> Self {
+        Self { parent_id, id }
+    }
+
+    pub fn parent_id(&self) -> QuicParentId {
+        self.parent_id
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 }
 

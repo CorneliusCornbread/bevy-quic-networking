@@ -20,7 +20,9 @@ use tokio::{
 
 use crate::common::{
     HandleChannelError, QuicParentId,
-    stream::{disconnect::StreamDisconnectReason, task_state::StreamTaskState},
+    stream::{
+        disconnect::StreamDisconnectReason, id::StreamId, task_state::StreamTaskState,
+    },
 };
 
 type AddrResult = Result<std::net::SocketAddr, s2n_quic::connection::Error>;
@@ -41,17 +43,17 @@ pub struct QuicReceiveStream {
     inbound_data: Receiver<RecvPacket>,
     inbound_control: Sender<RecControlMessage>,
     receive_errors: Receiver<Box<dyn Error + Send + Sync>>,
-    parent_id: QuicParentId,
-    stream_id: u64,
+    stream_id: StreamId,
 }
 
 impl QuicReceiveStream {
     pub fn new(runtime: Handle, rec: ReceiveStream, parent_id: QuicParentId) -> Self {
-        let stream_id = rec.id();
+        let stream_id = StreamId::new(parent_id, rec.id());
         let addr = rec.connection().remote_addr();
 
         let (receive_error_sender, receive_errors) = mpsc::channel(DEBUG_CHANNEL_SIZE);
-        let (inbound_control, inbound_control_receiver) = mpsc::channel(CONTROL_CHANNEL_SIZE);
+        let (inbound_control, inbound_control_receiver) =
+            mpsc::channel(CONTROL_CHANNEL_SIZE);
         let (inbound_data_sender, inbound_data) = mpsc::channel(INBOUND_CHANNEL_SIZE);
 
         let task = RecTask {
@@ -61,8 +63,7 @@ impl QuicReceiveStream {
             receive_errors: receive_error_sender,
             disconnect_flag: None,
             addr,
-            parent_id,
-            id: stream_id,
+            stream_id,
         };
 
         let rec_task = runtime.spawn(task.start());
@@ -73,7 +74,6 @@ impl QuicReceiveStream {
             inbound_data,
             inbound_control,
             receive_errors,
-            parent_id,
             stream_id,
         }
     }
@@ -135,6 +135,16 @@ impl QuicReceiveStream {
     pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
         self.task_state.get_disconnect_reason()
     }
+
+    /// Gets the ID information for the parent client or server for this stream
+    pub fn parent_id(&self) -> QuicParentId {
+        self.stream_id.parent_id()
+    }
+
+    /// Gets the the full ID information for this stream.
+    pub fn id(&self) -> StreamId {
+        self.stream_id
+    }
 }
 
 enum RecControlMessage {
@@ -148,20 +158,20 @@ struct RecTask {
     receive_errors: Sender<Box<dyn Error + Send + Sync>>,
     disconnect_flag: Option<StreamDisconnectReason>,
     addr: AddrResult,
-    parent_id: QuicParentId,
-    id: u64,
+    stream_id: StreamId,
 }
 
 impl RecTask {
     #[tracing::instrument(
         name = "quic_rec_task"
         skip(self),
-        fields(stream_id = self.id, parent_id = %self.parent_id, remote_address = ?self.addr)
+        fields(stream_id = %self.stream_id, remote_address = ?self.addr)
     )]
     async fn start(mut self) -> StreamDisconnectReason {
         info!("Receive stream opened.");
 
-        let mut read_buf: [Bytes; INBOUND_BUFF_SIZE] = std::array::from_fn(|_| Bytes::new());
+        let mut read_buf: [Bytes; INBOUND_BUFF_SIZE] =
+            std::array::from_fn(|_| Bytes::new());
 
         'running: loop {
             select! {
@@ -247,12 +257,14 @@ impl RecTask {
                 match e {
                     s2n_quic::stream::Error::ConnectionError { error, .. } => {
                         error!("Receive stream connection error: {error}");
-                        self.disconnect_flag = Some(StreamDisconnectReason::ConnectionError(error));
+                        self.disconnect_flag =
+                            Some(StreamDisconnectReason::ConnectionError(error));
                     }
 
                     s2n_quic::stream::Error::InvalidStream { source, .. } => {
                         error!("Invalid receive stream: {source}");
-                        self.disconnect_flag = Some(StreamDisconnectReason::InvalidStream);
+                        self.disconnect_flag =
+                            Some(StreamDisconnectReason::InvalidStream);
                     }
 
                     s2n_quic::stream::Error::StreamReset { error, source, .. } => {

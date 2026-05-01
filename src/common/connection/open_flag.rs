@@ -19,6 +19,7 @@ impl OpenFlag {
         self.0.store(false, Ordering::Relaxed)
     }
 
+    #[allow(dead_code)] // There's a possibility we will need this in the future, no real reason to get rid of it for now
     pub(crate) fn set_open(&self) {
         self.0.store(true, Ordering::Relaxed)
     }

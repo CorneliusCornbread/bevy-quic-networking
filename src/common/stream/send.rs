@@ -1,5 +1,5 @@
 use bevy::ecs::component::Component;
-use bevy::log::tracing::{self, Instrument};
+use bevy::log::tracing::{self};
 use bevy::log::{error, info, warn};
 use bytes::Bytes;
 use s2n_quic::stream::SendStream;
@@ -9,7 +9,9 @@ use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
+use crate::common::connection::id::ConnectionId;
 use crate::common::stream::disconnect::StreamDisconnectReason;
+use crate::common::stream::id::StreamId;
 use crate::common::stream::task_state::StreamTaskState;
 use crate::common::{HandleChannelError, QuicParentId};
 
@@ -33,18 +35,19 @@ pub struct QuicSendStream {
     outbound_data: Sender<Bytes>,
     outbound_control: Sender<SendControlMessage>,
     send_errors: Receiver<Box<dyn Error + Send + Sync>>,
-    parent_id: QuicParentId,
-    stream_id: u64,
+    stream_id: StreamId,
 }
 
 impl QuicSendStream {
     pub fn new(runtime: Handle, send: SendStream, parent_id: QuicParentId) -> Self {
-        let stream_id = send.id();
+        let stream_id = StreamId::new(parent_id, send.id());
         let addr = send.connection().local_addr();
 
         let (send_error_sender, send_errors) = mpsc::channel(DEBUG_CHANNEL_SIZE);
-        let (outbound_control, outbound_control_receiver) = mpsc::channel(CONTROL_CHANNEL_SIZE);
-        let (outbound_data, outbound_data_receiver) = mpsc::channel(OUTBOUND_CHANNEL_SIZE);
+        let (outbound_control, outbound_control_receiver) =
+            mpsc::channel(CONTROL_CHANNEL_SIZE);
+        let (outbound_data, outbound_data_receiver) =
+            mpsc::channel(OUTBOUND_CHANNEL_SIZE);
 
         let task = SendTask {
             send,
@@ -53,8 +56,7 @@ impl QuicSendStream {
             send_errors: send_error_sender,
             disconnect_flag: None,
             addr,
-            parent_id,
-            id: stream_id,
+            stream_id,
         };
 
         let send_task = runtime.spawn(task.start());
@@ -65,7 +67,6 @@ impl QuicSendStream {
             outbound_data,
             outbound_control,
             send_errors,
-            parent_id,
             stream_id,
         }
     }
@@ -94,13 +95,17 @@ impl QuicSendStream {
         !self.task_state.is_finished()
     }
 
+    /// Tries to send one set of bytes
     pub fn send(&mut self, data: Bytes) -> Result<(), TrySendError<Bytes>> {
         self.outbound_data.try_send(data)
     }
 
     /// Take a vector of bytes and send bytes until an error is hit
     /// or until the vector is emptied.
-    pub fn send_many_drain(&mut self, data: &mut Vec<Bytes>) -> Result<(), SendError<Bytes>> {
+    pub fn send_many_drain(
+        &mut self,
+        data: &mut Vec<Bytes>,
+    ) -> Result<(), SendError<Bytes>> {
         let mut sent_count = 0;
         let mut res = Ok(());
 
@@ -122,6 +127,8 @@ impl QuicSendStream {
         res
     }
 
+    /// Outputs any outstanding errors that have happened on the
+    /// async side of this stream.
     pub fn log_outstanding_errors(&mut self) {
         while !self.send_errors.is_empty() {
             let Some(err) = self.send_errors.blocking_recv() else {
@@ -132,15 +139,19 @@ impl QuicSendStream {
         }
     }
 
+    /// Gets the disconnect reason if the stream has closed.
+    /// Returns `None` if the stream is still open.
     pub fn get_disconnect_reason(&mut self) -> Option<StreamDisconnectReason> {
         self.task_state.get_disconnect_reason()
     }
 
+    /// Gets the ID information for the parent client or server for this stream
     pub fn parent_id(&self) -> QuicParentId {
-        self.parent_id
+        self.stream_id.parent_id()
     }
 
-    pub fn id(&self) -> u64 {
+    /// Gets the the full ID information for this stream.
+    pub fn id(&self) -> StreamId {
         self.stream_id
     }
 }
@@ -152,15 +163,14 @@ struct SendTask {
     send_errors: Sender<Box<dyn Error + Send + Sync>>,
     disconnect_flag: Option<StreamDisconnectReason>,
     addr: AddrResult,
-    parent_id: QuicParentId,
-    id: u64,
+    stream_id: StreamId,
 }
 
 impl SendTask {
     #[tracing::instrument(
         name = "quic_send_task"
         skip(self),
-        fields(stream_id = self.id, parent_id = %self.parent_id, remote_address = ?self.addr)
+        fields(stream_id = %self.stream_id, remote_address = ?self.addr)
     )]
     async fn start(mut self) -> StreamDisconnectReason {
         info!("Send stream opened.");

@@ -1,12 +1,13 @@
 use bevy::{
     ecs::component::Component,
     log::{
+        error,
         tracing::{self},
         warn,
     },
     prelude::{Deref, DerefMut},
 };
-use s2n_quic::{Connection, connection::Handle as ConnectionHandle, stream::PeerStream};
+use s2n_quic::{Connection, application, connection::Handle as ConnectionHandle};
 use std::sync::Arc;
 use tokio::{
     runtime::Handle,
@@ -22,17 +23,17 @@ use crate::common::{
     attempt::{QuicActionAttempt, TaskError},
     connection::{
         disconnect::ConnectionDisconnectReason,
+        id::ConnectionId,
         open_flag::OpenFlag,
         stream_flag::StreamFlag,
         task::{
-            ConnectionCommandError, ConnectionHandleTask, ConnectionTask,
-            ConnectionTaskState,
+            ConnectionCommand, ConnectionCommandError, ConnectionHandleTask,
+            ConnectionTask, ConnectionTaskState,
         },
     },
     stream::{
-        QuicBidirectionalStreamAttempt, QuicPeerStream, QuicPeerStreamAttempt,
-        QuicReceiveStreamAttempt, QuicSendStreamAttempt, receive::QuicReceiveStream,
-        send::QuicSendStream,
+        QuicBidirectionalStreamAttempt, QuicPeerStreamAttempt, QuicReceiveStreamAttempt,
+        QuicSendStreamAttempt,
     },
 };
 
@@ -47,19 +48,6 @@ pub mod task;
 const CONNECTION_CTRL_CHANNEL_SIZE: usize = 1024;
 
 type ConnectionResponse<T> = Result<Option<T>, TaskError>;
-
-pub(crate) enum ConnectionCommand {
-    AcceptReceive {
-        respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
-    },
-    AcceptBidirectional {
-        respond_to:
-            oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
-    },
-    Accept {
-        respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
-    },
-}
 
 /// This is a structure which represents an in progress connection.
 /// Any pending connections this attempt may hold will be closed
@@ -95,7 +83,7 @@ pub struct QuicConnection {
     task_state: ConnectionTaskState,
     conn_command_channel: mpsc::Sender<ConnectionCommand>,
     is_open: OpenFlag,
-    parent_id: QuicParentId,
+    connection_id: ConnectionId,
     /// Flag set by async wakers as soon as there's a new stream
     pending_stream: Arc<StreamFlag>,
 }
@@ -112,6 +100,7 @@ impl QuicConnection {
     ) -> Self {
         let res = connection.keep_alive(true);
         let (send, rec) = mpsc::channel(CONNECTION_CTRL_CHANNEL_SIZE);
+        let connection_id = ConnectionId::new(connection.id(), parent_id);
 
         let pending_stream = Arc::new(StreamFlag::new(false));
 
@@ -127,7 +116,7 @@ impl QuicConnection {
         let task = ConnectionTask::new(
             connection,
             rec,
-            parent_id,
+            connection_id,
             is_open.clone(),
             pending_stream.clone(),
         );
@@ -140,7 +129,7 @@ impl QuicConnection {
             task_state: ConnectionTaskState::new(runtime, handle),
             conn_command_channel: send,
             is_open,
-            parent_id,
+            connection_id,
             pending_stream,
         }
     }
@@ -167,7 +156,7 @@ impl QuicConnection {
         }
 
         let attempt =
-            QuicPeerStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+            QuicPeerStreamAttempt::new(self.runtime.clone(), rec, self.parent_id());
 
         Ok(attempt)
     }
@@ -194,7 +183,7 @@ impl QuicConnection {
         }
 
         let attempt =
-            QuicReceiveStreamAttempt::new(self.runtime.clone(), rec, self.parent_id);
+            QuicReceiveStreamAttempt::new(self.runtime.clone(), rec, self.parent_id());
 
         Ok(attempt)
     }
@@ -223,7 +212,7 @@ impl QuicConnection {
         let attempt = QuicBidirectionalStreamAttempt::new(
             self.runtime.clone(),
             rec,
-            self.parent_id,
+            self.parent_id(),
         );
 
         Ok(attempt)
@@ -236,7 +225,7 @@ impl QuicConnection {
         let task = ConnectionHandleTask::new(
             self.conn_handle.clone(),
             self.is_open.clone(),
-            self.parent_id,
+            self.connection_id,
         );
 
         let join = self.runtime.spawn(task.open_bidirectional());
@@ -244,7 +233,7 @@ impl QuicConnection {
         Ok(QuicBidirectionalStreamAttempt::new(
             self.runtime.clone(),
             join,
-            self.parent_id,
+            self.parent_id(),
         ))
     }
 
@@ -255,7 +244,7 @@ impl QuicConnection {
         let task = ConnectionHandleTask::new(
             self.conn_handle.clone(),
             self.is_open.clone(),
-            self.parent_id,
+            self.connection_id,
         );
 
         let join = self.runtime.spawn(task.open_send());
@@ -263,8 +252,36 @@ impl QuicConnection {
         Ok(QuicSendStreamAttempt::new(
             self.runtime.clone(),
             join,
-            self.parent_id,
+            self.parent_id(),
         ))
+    }
+
+    #[tracing::instrument(skip(self), fields(connection_id = %self.connection_id, remote_addr = ?self.conn_handle.remote_addr()))]
+    pub fn close(&self, code: application::Error) {
+        if !self.is_open() {
+            return;
+        }
+
+        let res = self
+            .conn_command_channel
+            .try_send(ConnectionCommand::Close(code));
+
+        let Err(err) = res else {
+            return;
+        };
+
+        match err {
+            mpsc::error::TrySendError::Full(_) => {
+                error!(
+                    "Unable to normally close connection due to full communication channel. Forcefully closing connection..."
+                );
+            }
+            mpsc::error::TrySendError::Closed(_) => error!(
+                "Connection command channel is closed but our connection is still open? Something has gone horribly wrong, this is a bug. Forcefully closing connection..."
+            ),
+        }
+
+        self.conn_handle.close(code);
     }
 
     /// Returns true if the connection is still open.
@@ -296,13 +313,13 @@ impl QuicConnection {
         self.task_state.get_disconnect_reason()
     }
 
-    /// Gets the Id information for the parent client or server for this connection
+    /// Gets the ID information for the parent client or server for this connection
     pub fn parent_id(&self) -> QuicParentId {
-        self.parent_id
+        self.connection_id.parent_id()
     }
 
-    // TODO: Create type for connection IDs
-    pub fn id(&self) -> u64 {
-        self.conn_handle.id()
+    /// Gets the ID information for both the parent and this connection
+    pub fn id(&self) -> ConnectionId {
+        self.connection_id
     }
 }

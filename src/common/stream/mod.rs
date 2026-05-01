@@ -43,6 +43,16 @@ impl QuicReceiveStreamAttempt {
     }
 }
 
+/// This is a structure which represents an in progress send stream.
+/// Any pending streams this attempt may hold will be closed
+/// if this structure is dropped without being handled.
+///
+/// Attempts are all handled internally. Put them on an entity
+/// and they will be replaced with a full [QuicSendStream].
+///
+/// In the event of a failure, with the `stream-errors` feature
+/// flag enabled, a [QuicActionErrorComponent][crate::common::attempt::QuicActionErrorComponent]
+/// will be added on the entity.
 #[derive(Deref, DerefMut, Component)]
 #[component(storage = "SparseSet")]
 pub struct QuicSendStreamAttempt(QuicActionAttempt<Option<QuicSendStream>>);

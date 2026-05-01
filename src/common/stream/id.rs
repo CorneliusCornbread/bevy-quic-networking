@@ -19,3 +19,17 @@ impl Display for StreamId {
         )
     }
 }
+
+impl StreamId {
+    pub fn new(parent_id: QuicParentId, id: u64) -> Self {
+        Self { parent_id, id }
+    }
+
+    pub fn parent_id(&self) -> QuicParentId {
+        self.parent_id
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}

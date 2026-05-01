@@ -5,7 +5,7 @@ use bevy::log::{
 };
 use futures::task::waker_ref;
 use s2n_quic::{
-    Connection,
+    Connection, application,
     connection::{Error as ConnectionError, Handle as ConnectionHandle},
     stream::PeerStream,
 };
@@ -28,11 +28,11 @@ use tokio::{
 };
 
 use crate::common::{
-    QuicParentId,
     attempt::TaskError,
     connection::{
-        ConnectionCommand, ConnectionResponse,
+        ConnectionResponse,
         disconnect::{ConnectionDisconnectReason, ConnectionErrorDisconnected},
+        id::ConnectionId,
         open_flag::OpenFlag,
         stream_flag::StreamFlag,
     },
@@ -55,6 +55,20 @@ const ACCEPT_TIMEOUT: Duration = Duration::from_millis(1);
 pub(in crate::common::connection) type ConnectionTaskState =
     QuicTaskState<ConnectionDisconnectReason>;
 
+pub(crate) enum ConnectionCommand {
+    AcceptReceive {
+        respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
+    },
+    AcceptBidirectional {
+        respond_to:
+            oneshot::Sender<ConnectionResponse<(QuicReceiveStream, QuicSendStream)>>,
+    },
+    Accept {
+        respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
+    },
+    Close(application::Error),
+}
+
 // TODO: This could be made public and used elsewhere as a async way to open new connections
 // or get information about a connection
 #[derive(Debug)]
@@ -62,15 +76,15 @@ pub(crate) struct ConnectionHandleTask {
     connection: ConnectionHandle,
     is_open: OpenFlag,
     remote_addr: Result<SocketAddr, ConnectionError>,
-    parent_id: QuicParentId,
+    connection_id: ConnectionId,
 }
 
 impl fmt::Display for ConnectionHandleTask {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ConnectionHandleTask(parent_id: {}, remote: {:?}, open: {})",
-            self.parent_id,
+            "ConnectionHandleTask(connection_id: {}, remote: {:?}, open: {})",
+            self.connection_id,
             self.remote_addr,
             self.is_open.get(),
         )
@@ -81,7 +95,7 @@ impl ConnectionHandleTask {
     pub(super) fn new(
         connection: ConnectionHandle,
         is_open: OpenFlag,
-        parent_id: QuicParentId,
+        connection_id: ConnectionId,
     ) -> Self {
         let remote_addr = connection.remote_addr();
 
@@ -89,7 +103,7 @@ impl ConnectionHandleTask {
             connection,
             is_open,
             remote_addr,
-            parent_id,
+            connection_id,
         }
     }
 
@@ -105,10 +119,16 @@ impl ConnectionHandleTask {
             Ok(stream) => {
                 let (rec_stream, send_stream) = stream.split();
 
-                let quic_send =
-                    QuicSendStream::new(Handle::current(), send_stream, self.parent_id);
-                let quic_rec =
-                    QuicReceiveStream::new(Handle::current(), rec_stream, self.parent_id);
+                let quic_send = QuicSendStream::new(
+                    Handle::current(),
+                    send_stream,
+                    self.connection_id.parent_id(),
+                );
+                let quic_rec = QuicReceiveStream::new(
+                    Handle::current(),
+                    rec_stream,
+                    self.connection_id.parent_id(),
+                );
 
                 Ok(Some((quic_rec, quic_send)))
             }
@@ -124,8 +144,11 @@ impl ConnectionHandleTask {
 
         match send_res {
             Ok(stream) => {
-                let quic_send =
-                    QuicSendStream::new(Handle::current(), stream, self.parent_id);
+                let quic_send = QuicSendStream::new(
+                    Handle::current(),
+                    stream,
+                    self.connection_id.parent_id(),
+                );
                 Ok(Some(quic_send))
             }
             Err(err) => Err(err.into()),
@@ -140,7 +163,7 @@ pub(crate) struct ConnectionTask {
     disconnect_flag: Option<ConnectionDisconnectReason>,
     is_open: OpenFlag,
     pending_stream: Arc<StreamFlag>,
-    parent_id: QuicParentId,
+    connection_id: ConnectionId,
     buffered_stream: Option<PeerStream>,
 }
 
@@ -148,7 +171,7 @@ impl ConnectionTask {
     pub(crate) fn new(
         connection: Connection,
         cmd_receiver: mpsc::Receiver<ConnectionCommand>,
-        parent_id: QuicParentId,
+        connection_id: ConnectionId,
         is_open: OpenFlag,
         pending_stream: Arc<StreamFlag>,
     ) -> Self {
@@ -158,7 +181,7 @@ impl ConnectionTask {
             disconnect_flag: None,
             is_open,
             pending_stream,
-            parent_id,
+            connection_id,
             buffered_stream: None,
         }
     }
@@ -167,8 +190,7 @@ impl ConnectionTask {
         name = "quic_connection_task"
         skip(self),
         fields(
-            connection_id = self.connection.id(),
-            parent_id = %self.parent_id,
+            connection_id = %self.connection_id,
             remote_address = ?self.connection.remote_addr()
         )
     )]
@@ -204,7 +226,7 @@ impl ConnectionTask {
                             let rec_stream = QuicReceiveStream::new(
                                 Handle::current(),
                                 stream,
-                                self.parent_id,
+                                self.connection_id.parent_id(),
                             );
 
                             let send_res = respond_to.send(Ok(Some(rec_stream)));
@@ -229,13 +251,13 @@ impl ConnectionTask {
                             let rec_stream = QuicReceiveStream::new(
                                 Handle::current(),
                                 rec,
-                                self.parent_id,
+                                self.connection_id.parent_id(),
                             );
 
                             let send_stream = QuicSendStream::new(
                                 Handle::current(),
                                 send,
-                                self.parent_id,
+                                self.connection_id.parent_id(),
                             );
 
                             let send_res =
@@ -257,7 +279,7 @@ impl ConnectionTask {
                             let peer_stream = QuicPeerStream::new(
                                 Handle::current(),
                                 stream,
-                                self.parent_id,
+                                self.connection_id.parent_id(),
                             );
 
                             let send_res = respond_to.send(Ok(Some(peer_stream)));
@@ -273,10 +295,13 @@ impl ConnectionTask {
                             self.accept(respond_to).await
                         }
                     }
+                    ConnectionCommand::Close(code) => {
+                        self.connection.close(code);
+                        Ok(())
+                    }
                 };
 
-                // TODO: make handle result function
-                //self.handle_cmd_result(cmd_res);
+                self.handle_cmd_result(cmd_res).await;
             }
         }
 
@@ -300,7 +325,11 @@ impl ConnectionTask {
         match accept_res {
             Ok(rec_opt) => {
                 let mapped = rec_opt.map(|rec_stream| {
-                    QuicReceiveStream::new(Handle::current(), rec_stream, self.parent_id)
+                    QuicReceiveStream::new(
+                        Handle::current(),
+                        rec_stream,
+                        self.connection_id.parent_id(),
+                    )
                 });
 
                 let send_err = respond_to.send(Ok(mapped)).is_err();
@@ -355,10 +384,16 @@ impl ConnectionTask {
                 let mapped = rec_opt.map(|bidir_stream| {
                     let (rec, send) = bidir_stream.split();
 
-                    let quic_rec =
-                        QuicReceiveStream::new(Handle::current(), rec, self.parent_id);
-                    let quic_send =
-                        QuicSendStream::new(Handle::current(), send, self.parent_id);
+                    let quic_rec = QuicReceiveStream::new(
+                        Handle::current(),
+                        rec,
+                        self.connection_id.parent_id(),
+                    );
+                    let quic_send = QuicSendStream::new(
+                        Handle::current(),
+                        send,
+                        self.connection_id.parent_id(),
+                    );
 
                     (quic_rec, quic_send)
                 });
@@ -413,7 +448,11 @@ impl ConnectionTask {
         match accept_res {
             Ok(rec_opt) => {
                 let mapped = rec_opt.map(|rec_stream| {
-                    QuicPeerStream::new(Handle::current(), rec_stream, self.parent_id)
+                    QuicPeerStream::new(
+                        Handle::current(),
+                        rec_stream,
+                        self.connection_id.parent_id(),
+                    )
                 });
 
                 let send_err = respond_to.send(Ok(mapped)).is_err();
@@ -445,6 +484,14 @@ impl ConnectionTask {
         }
 
         Ok(())
+    }
+
+    async fn handle_cmd_result(&mut self, cmd_res: Result<(), ConnectionError>) {
+        let Err(err) = cmd_res else {
+            return;
+        };
+
+        self.disconnect_flag = Some(ConnectionDisconnectReason::ConnectionError(err));
     }
 }
 

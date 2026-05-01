@@ -178,6 +178,7 @@ fn server_accept_connection(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn server_accept_bidirectional(
     mut commands: Commands,
     connection_query: Query<
@@ -201,7 +202,8 @@ fn server_accept_bidirectional(
     }
 }
 
-// Keeps track of the number of messages sent and received
+/// Keeps track of the number of messages sent and received
+#[allow(clippy::type_complexity)]
 fn add_debug(
     mut commands: Commands,
     query: Query<
