@@ -9,7 +9,6 @@ use tokio::select;
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::common::connection::id::ConnectionId;
 use crate::common::stream::disconnect::StreamDisconnectReason;
 use crate::common::stream::id::StreamId;
 use crate::common::stream::task_state::StreamTaskState;
