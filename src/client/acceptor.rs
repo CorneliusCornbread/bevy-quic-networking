@@ -18,8 +18,6 @@ pub struct SimpleClientAcceptorPlugin;
 // TODO: probably switch this to a single acceptor for both client and server implementations
 impl Plugin for SimpleClientAcceptorPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        todo!("This needs to be reworked, this is now very broken");
-
         app.add_systems(Update, accept_streams);
     }
 }
@@ -29,7 +27,9 @@ fn accept_streams(
     connection_query: Query<(Entity, &mut QuicConnection), With<QuicClientMarker>>,
 ) {
     for (connection_entity, mut connection) in connection_query {
-        handle_stream_accept(&mut commands, connection_entity, &mut connection);
+        if connection.should_poll_accept() {
+            handle_stream_accept(&mut commands, connection_entity, &mut connection);
+        }
     }
 }
 

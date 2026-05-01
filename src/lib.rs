@@ -28,9 +28,8 @@ impl PluginGroup for QuicDefaultPlugins {
             .add(QuicAsyncPlugin::default())
             .add(ConnectionAttemptPlugin)
             .add(StreamAttemptPlugin)
-        // TODO: fix the simple acceptor plugins
-        //.add(SimpleServerAcceptorPlugin)
-        //.add(SimpleClientAcceptorPlugin)
+            .add(SimpleServerAcceptorPlugin)
+            .add(SimpleClientAcceptorPlugin)
     }
 }
 

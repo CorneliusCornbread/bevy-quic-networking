@@ -47,10 +47,7 @@ impl QuicServer {
         })
     }
 
-    /// Polls to receive any new pending connections from the async thread.
-    ///
-    /// The async thread will automatically accept any pending connections.
-    /// It will then put them in a queue which is processed by this function.
+    /// Polls to receive any new pending connections
     pub fn accept_connection(&mut self) -> Result<ConnectionPoll, JoinError> {
         let waker = Arc::new(futures::task::noop_waker_ref());
         let mut cx = std::task::Context::from_waker(&waker);

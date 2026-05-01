@@ -22,7 +22,6 @@ pub struct SimpleServerAcceptorPlugin;
 
 impl Plugin for SimpleServerAcceptorPlugin {
     fn build(&self, app: &mut bevy::app::App) {
-        todo!("This needs to be reworked, this is now very broken");
         app.add_systems(Update, accept_connections)
             .add_systems(Update, accept_streams);
     }
@@ -55,11 +54,13 @@ fn accept_streams(
     connection_query: Query<(Entity, &mut QuicConnection), With<QuicServerMarker>>,
 ) {
     for (connection_entity, mut connection) in connection_query {
-        handle_stream_accept(&mut commands, connection_entity, &mut connection);
+        if connection.should_poll_accept() {
+            handle_stream_accept(&mut commands, connection_entity, &mut connection);
+        }
     }
 }
 
-#[tracing::instrument(name = "accept_server_stream", skip_all, fields(parent_id = %connection.parent_id()))]
+#[tracing::instrument(name = "accept_server_stream", skip_all, fields(id = %connection.id()))]
 fn handle_stream_accept(
     commands: &mut Commands,
     connection_entity: Entity,
