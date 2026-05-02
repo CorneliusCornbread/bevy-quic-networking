@@ -197,6 +197,18 @@ impl ConnectionTask {
     pub(crate) async fn start(mut self) -> ConnectionDisconnectReason {
         info!("New connection opened");
 
+        // We need to run accept() once to make sure the poll is registered
+        {
+            let waker = waker_ref(&self.pending_stream);
+            let mut cx = Context::from_waker(&waker);
+            let poll = self.connection.poll_accept(&mut cx);
+
+            // If we actually accept a stream during this buffer it to be handled later
+            if let Poll::Ready(Ok(Some(stream))) = poll {
+                self.buffered_stream = Some(stream);
+            }
+        }
+
         let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
 
         while self.disconnect_flag.is_none() {
