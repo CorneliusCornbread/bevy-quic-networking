@@ -1,20 +1,21 @@
+pub mod async_plugin;
 pub mod client;
 pub mod common;
-pub mod plugin;
 pub mod server;
 
 use bevy::app::{PluginGroup, PluginGroupBuilder};
 
 use crate::{
+    async_plugin::QuicAsyncPlugin,
     client::acceptor::SimpleClientAcceptorPlugin,
     common::{
         connection::plugin::ConnectionAttemptPlugin,
+        plugin::DisconnectHandlerPlugin,
         stream::{
             plugin::StreamAttemptPlugin,
             session::{QuicAeronetEventPlugin, QuicAeronetPacketPlugin},
         },
     },
-    plugin::QuicAsyncPlugin,
     server::acceptor::SimpleServerAcceptorPlugin,
 };
 
@@ -30,6 +31,7 @@ impl PluginGroup for QuicDefaultPlugins {
             .add(StreamAttemptPlugin)
             .add(SimpleServerAcceptorPlugin)
             .add(SimpleClientAcceptorPlugin)
+            .add(DisconnectHandlerPlugin)
     }
 }
 

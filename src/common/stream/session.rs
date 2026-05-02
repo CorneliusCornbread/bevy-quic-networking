@@ -4,17 +4,20 @@ use aeronet_io::{
 };
 use bevy::{
     app::{Plugin, PostUpdate, PreUpdate, Startup},
-    ecs::{entity::Entity, observer::On, system::Commands, world::World},
-    log::tracing,
+    ecs::{
+        component::Component,
+        entity::Entity,
+        observer::On,
+        query::With,
+        system::{Commands, Query},
+        world::World,
+    },
+    log::{tracing, warn},
 };
 use std::time::Instant;
 
 use crate::common::stream::{
     disconnect::StreamDisconnectReason, receive::QuicReceiveStream, send::QuicSendStream,
-};
-use bevy::{
-    ecs::{component::Component, query::With, system::Query},
-    log::warn,
 };
 
 const MIN_MTU: usize = 1200;
@@ -72,7 +75,9 @@ impl Plugin for QuicAeronetEventPlugin {
 }
 
 #[tracing::instrument(skip_all)]
-fn aeronet_session_recv(query: Query<(&mut Session, &mut QuicReceiveStream), With<QuicSession>>) {
+fn aeronet_session_recv(
+    query: Query<(&mut Session, &mut QuicReceiveStream), With<QuicSession>>,
+) {
     let mut buffer = Vec::new();
 
     for entity in query {
@@ -104,7 +109,9 @@ fn aeronet_session_recv(query: Query<(&mut Session, &mut QuicReceiveStream), Wit
 }
 
 #[tracing::instrument(skip_all)]
-fn aeronet_session_send(query: Query<(&mut Session, &mut QuicSendStream), With<QuicSession>>) {
+fn aeronet_session_send(
+    query: Query<(&mut Session, &mut QuicSendStream), With<QuicSession>>,
+) {
     for entity in query {
         let (mut session, mut send) = entity;
         let parent_id = send.parent_id();

@@ -15,6 +15,7 @@ use crate::{
 pub mod attempt;
 pub mod connection;
 pub(crate) mod id;
+pub mod plugin;
 pub mod runtime;
 pub mod status_code;
 pub mod stream;
