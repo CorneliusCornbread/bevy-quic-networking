@@ -6,7 +6,7 @@ use s2n_quic::stream::SendStream;
 use std::error::Error;
 use tokio::runtime::Handle;
 use tokio::select;
-use tokio::sync::mpsc::error::{SendError, TrySendError};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::common::stream::disconnect::StreamDisconnectReason;
@@ -21,7 +21,7 @@ const DEBUG_CHANNEL_SIZE: usize = 32;
 /// How many commands can be sent to the send socket without being processed before being dropped
 const CONTROL_CHANNEL_SIZE: usize = 32;
 /// How many messages can sit between async and bevy before being dropped
-const OUTBOUND_CHANNEL_SIZE: usize = 128;
+const OUTBOUND_CHANNEL_SIZE: usize = 512;
 
 /// Minimum size of the send buffer of Bytes chunks we can receive at once is to send to bevy
 const MIN_OUTBOUND_BUF_SIZE: usize = 64;
@@ -104,12 +104,12 @@ impl QuicSendStream {
     pub fn send_many_drain(
         &mut self,
         data: &mut Vec<Bytes>,
-    ) -> Result<(), SendError<Bytes>> {
+    ) -> Result<(), TrySendError<Bytes>> {
         let mut sent_count = 0;
         let mut res = Ok(());
 
         for item in data.iter() {
-            res = self.outbound_data.blocking_send(item.clone());
+            res = self.outbound_data.try_send(item.clone());
             if res.is_err() {
                 break;
             }

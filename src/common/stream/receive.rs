@@ -32,10 +32,10 @@ const DEBUG_CHANNEL_SIZE: usize = 64;
 /// How many commands can be sent to the receive socket without being processed before being dropped
 const CONTROL_CHANNEL_SIZE: usize = 32;
 /// How many messages can sit between async and bevy before being dropped
-const INBOUND_CHANNEL_SIZE: usize = 128;
+const INBOUND_CHANNEL_SIZE: usize = 512;
 
 /// How big the receive buffer of Bytes chunks we can receive at once is to be sent to Bevy
-const INBOUND_BUFF_SIZE: usize = 64;
+const INBOUND_BUFF_SIZE: usize = 128;
 
 #[derive(Debug, Component)]
 pub struct QuicReceiveStream {
@@ -80,11 +80,7 @@ impl QuicReceiveStream {
 
     /// Receives a single packet from the QUIC stream.
     pub fn recv(&mut self) -> Option<RecvPacket> {
-        if self.inbound_data.is_empty() {
-            return None;
-        }
-
-        self.inbound_data.blocking_recv()
+        self.inbound_data.try_recv().ok()
     }
 
     /// Receive multiple packets of data and push them to the given

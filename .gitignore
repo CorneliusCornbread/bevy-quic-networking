@@ -26,3 +26,7 @@ Cargo.lock
 
 # Sem diff cache
 /.sem
+
+# Flamegraph stuffs
+flamegraph.svg
+perf.data*
