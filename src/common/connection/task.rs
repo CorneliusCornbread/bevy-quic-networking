@@ -3,20 +3,12 @@ use bevy::log::{
     tracing::{self},
     warn,
 };
-use futures::task::waker_ref;
 use s2n_quic::{
     Connection, application,
     connection::{Error as ConnectionError, Handle as ConnectionHandle},
     stream::PeerStream,
 };
-use std::{
-    error::Error,
-    fmt,
-    net::SocketAddr,
-    sync::Arc,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{error::Error, fmt, net::SocketAddr, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::{
     runtime::Handle,
@@ -25,7 +17,7 @@ use tokio::{
         mpsc::{self, error::TrySendError},
         oneshot,
     },
-    time::{self, timeout},
+    time::timeout,
 };
 
 use crate::common::{
@@ -40,8 +32,6 @@ use crate::common::{
     stream::{QuicPeerStream, receive::QuicReceiveStream, send::QuicSendStream},
     task_state::QuicTaskState,
 };
-
-const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
 
 /// Timeout used when the buffered stream type doesn't match what the command
 /// asked for, so we do a short poll to see if the right type is available.
