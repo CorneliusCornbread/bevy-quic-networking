@@ -20,6 +20,7 @@ use std::{
 use thiserror::Error;
 use tokio::{
     runtime::Handle,
+    select,
     sync::{
         mpsc::{self, error::TrySendError},
         oneshot,
@@ -41,16 +42,10 @@ use crate::common::{
 };
 
 const CONNECTION_CMD_BUFF_SIZE_MAX: usize = 128;
-const CONNECTION_CMD_BUFF_SIZE_MIN: usize = 32;
 
-/// Timeout used by receive and bidrectional accept variants.
-/// If no stream is accepted by this timeout we will assume there are
-/// no pending streams and return None
-///
-/// Regular accept uses poll behaviour so it is not subject to timeouts.
-/// This also means the accept() variant is less tolerant to network
-/// timings.
-const ACCEPT_TIMEOUT: Duration = Duration::from_millis(1);
+/// Timeout used when the buffered stream type doesn't match what the command
+/// asked for, so we do a short poll to see if the right type is available.
+const ACCEPT_MISMATCH_TIMEOUT: Duration = Duration::from_millis(1);
 
 pub(in crate::common::connection) type ConnectionTaskState =
     QuicTaskState<ConnectionDisconnectReason>;
@@ -164,6 +159,7 @@ pub(crate) struct ConnectionTask {
     is_open: OpenFlag,
     pending_stream: Arc<StreamFlag>,
     connection_id: ConnectionId,
+    /// Holds a stream that arrived before a matching command was ready to consume it.
     buffered_stream: Option<PeerStream>,
 }
 
@@ -197,126 +193,65 @@ impl ConnectionTask {
     pub(crate) async fn start(mut self) -> ConnectionDisconnectReason {
         info!("New connection opened");
 
-        let mut cmd_buf = Vec::with_capacity(CONNECTION_CMD_BUFF_SIZE_MIN);
-
         while self.disconnect_flag.is_none() {
-            // We need to run accept() once to make sure the poll is registered
-            {
-                let waker = waker_ref(&self.pending_stream);
-                let mut cx = Context::from_waker(&waker);
-                let poll = self.connection.poll_accept(&mut cx);
-
-                // If we actually accept a stream during this buffer it to be handled later
-                if let Poll::Ready(Ok(Some(stream))) = poll {
-                    self.buffered_stream = Some(stream);
+            // If we have a buffered stream, we only need to wait for a command
+            // that will consume it.
+            if self.buffered_stream.is_some() {
+                self.pending_stream.set_true();
+                match self.cmd_receiver.recv().await {
+                    Some(cmd) => {
+                        let res = self.handle_command(cmd).await;
+                        self.handle_cmd_result(res).await;
+                    }
+                    None => {
+                        self.disconnect_flag =
+                            Some(ConnectionDisconnectReason::MspcChannelClosed {
+                                channel_name: "Connection command channel".into(),
+                            });
+                    }
                 }
-            }
+            } else {
+                // No buffered stream: race commands against an incoming stream.
+                select! {
+                    biased;
 
-            let poll;
+                    cmd_opt = self.cmd_receiver.recv() => {
+                        match cmd_opt {
+                            Some(cmd) => {
+                                let res = self.handle_command(cmd).await;
+                                self.handle_cmd_result(res).await;
+                            }
+                            None => {
+                                self.disconnect_flag = Some(
+                                    ConnectionDisconnectReason::MspcChannelClosed {
+                                        channel_name: "Connection command channel".into(),
+                                    },
+                                );
+                            }
+                        }
+                    }
 
-            {
-                let waker = Arc::new(futures::task::noop_waker_ref());
-                let mut cx = std::task::Context::from_waker(&waker);
-                poll = self.cmd_receiver.poll_recv_many(
-                    &mut cx,
-                    &mut cmd_buf,
-                    CONNECTION_CMD_BUFF_SIZE_MAX,
-                );
-            }
-
-            let count = match poll {
-                Poll::Ready(c) => c,
-                Poll::Pending => {
-                    time::sleep(Duration::from_micros(500)).await;
-                    0
+                    accept_res = self.connection.accept() => {
+                        match accept_res {
+                            Ok(Some(stream)) => {
+                                // Buffer it, the next command will consume it.
+                                self.buffered_stream = Some(stream);
+                            }
+                            Ok(None) => {
+                                self.disconnect_flag = Some(
+                                    ConnectionDisconnectReason::PeerClosed
+                                );
+                            }
+                            Err(err) => {
+                                if err.is_closed() {
+                                    self.is_open.set_closed();
+                                }
+                                self.disconnect_flag =
+                                    Some(ConnectionDisconnectReason::ConnectionError(err));
+                            }
+                        }
+                    }
                 }
-            };
-
-            for cmd in cmd_buf.drain(..count) {
-                let cmd_res = match cmd {
-                    ConnectionCommand::AcceptReceive { respond_to } => {
-                        if let Some(PeerStream::Receive(stream)) =
-                            self.buffered_stream.take()
-                        {
-                            let rec_stream = QuicReceiveStream::new(
-                                Handle::current(),
-                                stream,
-                                self.connection_id.parent_id(),
-                            );
-
-                            let send_res = respond_to.send(Ok(Some(rec_stream)));
-
-                            if send_res.is_err() {
-                                warn!(
-                                    "Attempted to send buffered stream resulting in error, connection will be closed."
-                                );
-                            }
-
-                            Ok(())
-                        } else {
-                            self.accept_receive(respond_to).await
-                        }
-                    }
-                    ConnectionCommand::AcceptBidirectional { respond_to } => {
-                        if let Some(PeerStream::Bidirectional(stream)) =
-                            self.buffered_stream.take()
-                        {
-                            let (rec, send) = stream.split();
-
-                            let rec_stream = QuicReceiveStream::new(
-                                Handle::current(),
-                                rec,
-                                self.connection_id.parent_id(),
-                            );
-
-                            let send_stream = QuicSendStream::new(
-                                Handle::current(),
-                                send,
-                                self.connection_id.parent_id(),
-                            );
-
-                            let send_res =
-                                respond_to.send(Ok(Some((rec_stream, send_stream))));
-
-                            if send_res.is_err() {
-                                warn!(
-                                    "Attempted to send buffered stream resulting in error, connection will be closed."
-                                );
-                            }
-
-                            Ok(())
-                        } else {
-                            self.accept_bidirectional(respond_to).await
-                        }
-                    }
-                    ConnectionCommand::Accept { respond_to } => {
-                        if let Some(stream) = self.buffered_stream.take() {
-                            let peer_stream = QuicPeerStream::new(
-                                Handle::current(),
-                                stream,
-                                self.connection_id.parent_id(),
-                            );
-
-                            let send_res = respond_to.send(Ok(Some(peer_stream)));
-
-                            if send_res.is_err() {
-                                warn!(
-                                    "Attempted to send buffered stream resulting in error, connection will be closed."
-                                );
-                            }
-
-                            Ok(())
-                        } else {
-                            self.accept(respond_to).await
-                        }
-                    }
-                    ConnectionCommand::Close(code) => {
-                        self.connection.close(code);
-                        Ok(())
-                    }
-                };
-
-                self.handle_cmd_result(cmd_res).await;
             }
         }
 
@@ -326,179 +261,197 @@ impl ConnectionTask {
             )))
     }
 
-    pub(crate) async fn accept_receive(
+    async fn handle_command(
+        &mut self,
+        cmd: ConnectionCommand,
+    ) -> Result<(), ConnectionError> {
+        match cmd {
+            ConnectionCommand::Accept { respond_to } => {
+                if let Some(stream) = self.buffered_stream.take() {
+                    let peer_stream = QuicPeerStream::new(
+                        Handle::current(),
+                        stream,
+                        self.connection_id.parent_id(),
+                    );
+                    if respond_to.send(Ok(Some(peer_stream))).is_err() {
+                        warn!(
+                            "Accept response handler closed before stream could be sent."
+                        );
+                    }
+                    Ok(())
+                } else {
+                    let _ = respond_to.send(Ok(None));
+                    Ok(())
+                }
+            }
+
+            ConnectionCommand::AcceptReceive { respond_to } => {
+                match self.buffered_stream.take() {
+                    Some(PeerStream::Receive(stream)) => {
+                        let rec = QuicReceiveStream::new(
+                            Handle::current(),
+                            stream,
+                            self.connection_id.parent_id(),
+                        );
+                        if respond_to.send(Ok(Some(rec))).is_err() {
+                            warn!(
+                                "Accept receive response handler closed before stream \
+                                could be sent."
+                            );
+                        }
+                        Ok(())
+                    }
+                    Some(other) => {
+                        // Wrong type, put it back and do a short poll for the right one.
+                        self.buffered_stream = Some(other);
+                        self.accept_receive(respond_to).await
+                    }
+                    None => self.accept_receive(respond_to).await,
+                }
+            }
+
+            ConnectionCommand::AcceptBidirectional { respond_to } => {
+                match self.buffered_stream.take() {
+                    Some(PeerStream::Bidirectional(stream)) => {
+                        let (rec, send) = stream.split();
+                        let rec = QuicReceiveStream::new(
+                            Handle::current(),
+                            rec,
+                            self.connection_id.parent_id(),
+                        );
+                        let send = QuicSendStream::new(
+                            Handle::current(),
+                            send,
+                            self.connection_id.parent_id(),
+                        );
+                        if respond_to.send(Ok(Some((rec, send)))).is_err() {
+                            warn!(
+                                "Accept bidir response handler closed before stream \
+                                could be sent."
+                            );
+                        }
+                        Ok(())
+                    }
+                    Some(other) => {
+                        self.buffered_stream = Some(other);
+                        self.accept_bidirectional(respond_to).await
+                    }
+                    None => self.accept_bidirectional(respond_to).await,
+                }
+            }
+
+            ConnectionCommand::Close(code) => {
+                self.connection.close(code);
+                Ok(())
+            }
+        }
+    }
+
+    async fn accept_receive(
         &mut self,
         respond_to: oneshot::Sender<ConnectionResponse<QuicReceiveStream>>,
     ) -> Result<(), ConnectionError> {
-        let timeout =
-            timeout(ACCEPT_TIMEOUT, self.connection.accept_receive_stream()).await;
+        let res = timeout(
+            ACCEPT_MISMATCH_TIMEOUT,
+            self.connection.accept_receive_stream(),
+        )
+        .await;
 
-        let Ok(accept_res) = timeout else {
+        let Ok(accept_res) = res else {
+            let _ = respond_to.send(Ok(None));
             return Ok(());
         };
 
         match accept_res {
-            Ok(rec_opt) => {
-                let mapped = rec_opt.map(|rec_stream| {
+            Ok(opt) => {
+                let mapped = opt.map(|s| {
                     QuicReceiveStream::new(
                         Handle::current(),
-                        rec_stream,
+                        s,
                         self.connection_id.parent_id(),
                     )
                 });
-
-                let send_err = respond_to.send(Ok(mapped)).is_err();
-
-                if send_err {
+                if respond_to.send(Ok(mapped)).is_err() {
                     warn!(
-                        "Accept stream opened with the response handler being closed before it could be sent.",
+                        "Accept receive stream opened but response handler was already \
+                        closed."
                     );
                 }
+                Ok(())
             }
             Err(err) => {
-                let send_err = respond_to
+                if respond_to
                     .send(Err(TaskError::ConnectionFailed(err)))
-                    .is_err();
-
-                if send_err {
+                    .is_err()
+                {
                     warn!(
-                        "Opened send stream errored with the response handler being closed before it could be sent: {0}",
-                        err
+                        "Accept receive errored and response handler was already closed."
                     );
                 }
-
                 if err.is_closed() {
                     self.is_open.set_closed();
                 }
-
-                return Err(err);
+                Err(err)
             }
         }
-
-        Ok(())
     }
 
-    pub(crate) async fn accept_bidirectional(
+    async fn accept_bidirectional(
         &mut self,
         respond_to: oneshot::Sender<
             ConnectionResponse<(QuicReceiveStream, QuicSendStream)>,
         >,
     ) -> Result<(), ConnectionError> {
-        let timeout = timeout(
-            ACCEPT_TIMEOUT,
+        let res = timeout(
+            ACCEPT_MISMATCH_TIMEOUT,
             self.connection.accept_bidirectional_stream(),
         )
         .await;
 
-        let Ok(accept_res) = timeout else {
+        let Ok(accept_res) = res else {
+            let _ = respond_to.send(Ok(None));
             return Ok(());
         };
 
         match accept_res {
-            Ok(rec_opt) => {
-                let mapped = rec_opt.map(|bidir_stream| {
-                    let (rec, send) = bidir_stream.split();
-
-                    let quic_rec = QuicReceiveStream::new(
+            Ok(opt) => {
+                let mapped = opt.map(|bidir| {
+                    let (rec, send) = bidir.split();
+                    let rec = QuicReceiveStream::new(
                         Handle::current(),
                         rec,
                         self.connection_id.parent_id(),
                     );
-                    let quic_send = QuicSendStream::new(
+                    let send = QuicSendStream::new(
                         Handle::current(),
                         send,
                         self.connection_id.parent_id(),
                     );
-
-                    (quic_rec, quic_send)
+                    (rec, send)
                 });
-
-                let send_err = respond_to.send(Ok(mapped)).is_err();
-
-                if send_err {
+                if respond_to.send(Ok(mapped)).is_err() {
                     warn!(
-                        "Bidrectional stream opened with the response handler being closed before it could be sent.",
+                        "Accept bidir stream opened but response handler was already \
+                        closed."
                     );
                 }
+                Ok(())
             }
             Err(err) => {
-                let send_err = respond_to
+                if respond_to
                     .send(Err(TaskError::ConnectionFailed(err)))
-                    .is_err();
-
-                if send_err {
+                    .is_err()
+                {
                     warn!(
-                        "Opened bidirectional stream errored with the response handler being closed before it could be sent: {0}",
-                        err
+                        "Accept bidir errored and response handler was already closed."
                     );
                 }
-
                 if err.is_closed() {
                     self.is_open.set_closed();
                 }
-
-                return Err(err);
+                Err(err)
             }
         }
-
-        Ok(())
-    }
-
-    pub(crate) async fn accept(
-        &mut self,
-        respond_to: oneshot::Sender<ConnectionResponse<QuicPeerStream>>,
-    ) -> Result<(), ConnectionError> {
-        let poll;
-
-        {
-            let waker = waker_ref(&self.pending_stream);
-            let mut cx = Context::from_waker(&waker);
-            poll = self.connection.poll_accept(&mut cx);
-        }
-
-        let Poll::Ready(accept_res) = poll else {
-            return Ok(());
-        };
-
-        match accept_res {
-            Ok(rec_opt) => {
-                let mapped = rec_opt.map(|rec_stream| {
-                    QuicPeerStream::new(
-                        Handle::current(),
-                        rec_stream,
-                        self.connection_id.parent_id(),
-                    )
-                });
-
-                let send_err = respond_to.send(Ok(mapped)).is_err();
-
-                if send_err {
-                    warn!(
-                        "Accept stream opened with the response handler being closed before it could be sent.",
-                    );
-                }
-            }
-            Err(err) => {
-                let send_err = respond_to
-                    .send(Err(TaskError::ConnectionFailed(err)))
-                    .is_err();
-
-                if send_err {
-                    warn!(
-                        "Opened send stream errored with the response handler being closed before it could be sent: {0}",
-                        err
-                    );
-                }
-
-                if err.is_closed() {
-                    self.is_open.set_closed();
-                }
-
-                return Err(err);
-            }
-        }
-
-        Ok(())
     }
 
     async fn handle_cmd_result(&mut self, cmd_res: Result<(), ConnectionError>) {

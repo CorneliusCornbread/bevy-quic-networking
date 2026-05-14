@@ -1,11 +1,16 @@
 use aeronet_io::{anyhow::anyhow, connection::DisconnectReason};
-use s2n_quic::connection::Error as ConnectionError;
+use s2n_quic::connection::{Error as ConnectionError, error::Code};
 use std::{error::Error, sync::Arc};
+
+const PEER_CLOSED_WITHOUT_CODE: &str =
+    "Connection has been closed by user without an error";
 
 #[derive(Clone, Debug)]
 pub enum ConnectionDisconnectReason {
     /// Connection was closed by the local user explicitly
-    UserClosed(ConnectionError),
+    UserClosed(Code),
+    /// Connection was closed by the peer without an error
+    PeerClosed,
     /// Connection was closed or errored elsewhere
     ConnectionError(ConnectionError),
     MspcChannelClosed {
@@ -26,6 +31,9 @@ impl From<ConnectionDisconnectReason> for DisconnectReason {
             ConnectionDisconnectReason::UserClosed(code) => DisconnectReason::ByUser(
                 format!("Connection closed by user with error code {}", code),
             ),
+            ConnectionDisconnectReason::PeerClosed => {
+                DisconnectReason::ByPeer(PEER_CLOSED_WITHOUT_CODE.to_owned())
+            }
             ConnectionDisconnectReason::ConnectionError(conn_err) => match conn_err {
                 s2n_quic::connection::Error::Application {
                     error, initiator, ..
@@ -46,10 +54,7 @@ impl From<ConnectionDisconnectReason> for DisconnectReason {
                 s2n_quic::connection::Error::Closed { initiator, .. } => {
                     match initiator {
                         s2n_quic::provider::event::Location::Local => {
-                            DisconnectReason::ByUser(
-                                "Connection has been closed by user without an error"
-                                    .to_owned(),
-                            )
+                            DisconnectReason::ByUser(PEER_CLOSED_WITHOUT_CODE.to_owned())
                         }
                         s2n_quic::provider::event::Location::Remote => {
                             DisconnectReason::ByPeer(
