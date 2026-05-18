@@ -11,7 +11,7 @@ First start by selecting the relevant version of the crate based on the version 
 You can add the crate to your project with the following addition to your `cargo.toml`
 ```toml
 [dependencies]
-bevy-s2n-quic = "0.19"
+bevy-s2n-quic = "0.18"
 ```
 
 And by adding the default plugins
