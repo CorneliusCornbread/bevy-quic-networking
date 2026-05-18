@@ -17,6 +17,7 @@ use crate::{
 pub mod acceptor;
 pub mod marker;
 
+/// The component which represents a client connection.
 #[derive(Component)]
 #[require(QuicClientMarker)]
 pub struct QuicClient {
@@ -26,6 +27,8 @@ pub struct QuicClient {
 }
 
 impl QuicClient {
+    /// Construct a client with default TLS settings. This will not allow you to connect to
+    /// servers with self-signed certs.
     pub fn new(runtime: &TokioRuntime) -> Self {
         let client = runtime.block_on(build());
 
@@ -36,6 +39,8 @@ impl QuicClient {
         }
     }
 
+    /// Construct a client with custom TLS settings. This is commonly used for development purposes
+    /// to allow custom certs.
     pub fn new_with_tls<C: IntoCertificate>(
         runtime: &TokioRuntime,
         certificate: C,
@@ -51,6 +56,7 @@ impl QuicClient {
         Ok(ret)
     }
 
+    /// The unique ID for this QUIC session.
     pub fn id(&self) -> QuicParentId {
         self.id
     }

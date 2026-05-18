@@ -1,16 +1,8 @@
-use aeronet_io::packet::RecvPacket;
-use bevy::{
-    ecs::{entity::Entity, system::EntityCommands},
-    log::{error, warn},
-};
-use std::{error::Error, fmt};
+use bevy::log::error;
+use std::fmt;
 use tokio::sync::mpsc::error::TrySendError;
 
-use crate::{
-    client::marker::QuicClientMarker,
-    common::{id::IdGenerator, stream::id::StreamId},
-    server::marker::QuicServerMarker,
-};
+use crate::common::id::IdGenerator;
 
 pub mod attempt;
 pub mod connection;
@@ -21,9 +13,13 @@ pub mod status_code;
 pub mod stream;
 pub(crate) mod task_state;
 
+/// Enum determining the type (server or client) of the parent
+/// which is responsible for any given QUIC network resource.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum QuicParentType {
+    /// This resource was created by a [QuicServer][crate::server::QuicServer]
     Server,
+    /// This resource was created by a [QuicClient][crate::client::QuicClient]
     Client,
 }
 
@@ -36,6 +32,9 @@ impl fmt::Display for QuicParentType {
     }
 }
 
+/// An ID which uniquely identifies the [QuicClient][crate::client::QuicClient] or
+/// [QuicServer][crate::server::QuicServer] that is responsible for the given
+/// QUIC network resource.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct QuicParentId {
     parent_type: QuicParentType,
@@ -57,10 +56,14 @@ impl QuicParentId {
         }
     }
 
+    /// Gets the unique ID for the parent structure. This is unique across all
+    /// [QuicClient][crate::client::QuicClient] and [QuicServer][crate::server::QuicServer]
+    /// instances.
     pub fn parent_id(&self) -> u64 {
         self.parent_id
     }
 
+    /// Gets the type of connection created this network resource.
     pub fn connection_type(&self) -> QuicParentType {
         self.parent_type
     }
@@ -70,16 +73,6 @@ impl fmt::Display for QuicParentId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} Id: {}", self.parent_type, self.parent_id)
     }
-}
-
-// TODO: Move connect, stream information, and data information into their own enums
-#[derive(Debug)]
-pub enum TransportData {
-    Connected(StreamId),
-    ConnectFailed(Box<dyn Error + Send>),
-    ConnectInProgress,
-    FailedStream(Box<dyn Error + Send>),
-    ReceivedData(RecvPacket),
 }
 
 pub(crate) trait HandleChannelError {
@@ -94,40 +87,4 @@ impl<T> HandleChannelError for Result<(), TrySendError<T>> {
             );
         }
     }
-}
-
-pub fn handle_markers<'a>(
-    e: &mut EntityCommands<'a>,
-    entity: Entity,
-    is_server: bool,
-    is_client: bool,
-) {
-    match (is_client, is_server) {
-        // client
-        (true, false) => {
-            e.insert(QuicClientMarker);
-        }
-
-        // server
-        (false, true) => {
-            e.insert(QuicServerMarker);
-        }
-
-        // both? weird state that shouldn't happen
-        (true, true) => {
-            warn!(
-                "Entity {} had both client/server markers, this could result in weird behaviour.",
-                entity
-            );
-            e.insert((QuicServerMarker, QuicClientMarker));
-        }
-
-        // neither? this is fine but it may be ignored by the different system queries
-        (false, false) => {
-            warn!(
-                "Entity {} had no client/server markers, this may mean it's subsequent connection is not handled by systems which expect these markers.",
-                entity
-            );
-        }
-    };
 }
