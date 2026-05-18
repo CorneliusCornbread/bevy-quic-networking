@@ -1,3 +1,30 @@
+//! # bevy-s2n-quic
+//!
+//! An Aeronet compatible Bevy plugin providing network IO with QUIC based on
+//! [s2n-quic](https://github.com/aws/s2n-quic).
+//!
+//! ## Getting Started
+//!
+//! Add the default plugins to your app:
+//!
+//! ```no_run
+//! use bevy::prelude::*;
+//! use bevy_s2n_quic::QuicDefaultPlugins;
+//!
+//! App::new()
+//!     .add_plugins(QuicDefaultPlugins);
+//! ```
+//!
+//! See the simple_net_system example for a basic setup of connecting a server and client
+//!
+//! ## Feature Flags
+//!
+//! | Flag | Description |
+//! |------|-------------|
+//! | `connection-errors` | Adds error components when connections fail |
+//! | `stream-errors` | Adds error components when streams fail |
+//! | `performance-warns` | Warns when buffers fill faster than they drain (default) |
+
 pub mod async_plugin;
 pub mod client;
 pub mod common;
