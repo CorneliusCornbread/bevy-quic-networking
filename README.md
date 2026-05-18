@@ -67,3 +67,12 @@ fn client_open_stream(
 AI has been used for the purposes of indexing documentation, generating examples and helping identify under documented public APIs, as well as in
 assisting in refactors or code snippets. All code is human authored with a human being responsible for maintaining any code which does not behave as
 intended.
+
+# License
+
+Licensed under either of:
+
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+
+at your option.

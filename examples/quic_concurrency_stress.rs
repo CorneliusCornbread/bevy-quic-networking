@@ -55,7 +55,7 @@ use bevy::{
     time::Time,
     utils::default,
 };
-use bevy_quic_networking::{
+use bevy_s2n_quic::{
     QuicDefaultPlugins,
     client::{QuicClient, marker::QuicClientMarker},
     common::{

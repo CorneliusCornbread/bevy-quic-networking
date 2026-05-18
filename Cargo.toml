@@ -1,7 +1,13 @@
 [package]
-name = "bevy-quic-networking"
+name = "bevy-s2n-quic"
 version = "0.18.0"
 edition = "2024"
+description = "An Aeronet compatible Bevy plugin providing network IO with QUIC based on s2n-quic"
+readme = "README.md"
+repository = "https://github.com/CorneliusCornbread/bevy-quic-networking"
+license = "MIT OR Apache-2.0"
+keywords = ["gamedev", "networking", "bevy", "aeronet", "quic", "s2n-quic"]
+categories = ["game-development", "network-programming"]
 
 [dependencies]
 aeronet_io = "0.20.0"
