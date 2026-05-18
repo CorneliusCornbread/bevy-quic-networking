@@ -1,6 +1,6 @@
 [package]
 name = "bevy-s2n-quic"
-version = "0.18.1"
+version = "0.18.2"
 edition = "2024"
 description = "An Aeronet compatible Bevy plugin providing network IO with QUIC based on s2n-quic"
 readme = "README.md"
