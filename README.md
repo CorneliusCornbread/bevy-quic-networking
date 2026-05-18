@@ -62,3 +62,8 @@ fn client_open_stream(
     }
 }
 ```
+
+# AI Usage
+AI has been used for the purposes of indexing documentation, generating examples and helping identify under documented public APIs, as well as in
+assisting in refactors or code snippets. All code is human authored with a human being responsible for maintaining any code which does not behave as
+intended.
