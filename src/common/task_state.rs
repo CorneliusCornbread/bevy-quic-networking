@@ -1,6 +1,9 @@
 use std::{error::Error, sync::Arc};
 use tokio::{runtime::Handle, task::JoinHandle};
 
+// TODO: Change this to use Oncelock<T>
+// we're moving to a central orchestrator architecture for
+// async tasks.
 #[derive(Debug)]
 pub(crate) struct QuicTaskState<T>
 where
